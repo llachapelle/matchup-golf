@@ -3170,6 +3170,7 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
   };
 
   const selectedFormat = MATCH_FORMATS.find(f=>f.name===format) || MATCH_FORMATS[0];
+  const p1Label = p1Players.length ? p1Players.map(p=>p.name).join(" / ") : "Select players…";
   const p2Label = p2Players.length ? p2Players.map(p=>p.name).join(" / ") : "Select players…";
 
   const createMatch = async () => {
