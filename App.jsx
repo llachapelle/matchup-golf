@@ -617,11 +617,11 @@ function LoginScreen({onAuth}){
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function DashboardScreen({go, goMatch, matches, ts, playerRecords}){
+function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
   const live = matches.filter(m=>m.status==="live");
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
-      <Header sub="⛳ MatchUp Golf" title="Sand Valley Ryder Cup" detail="June 5–8  ·  Round 2 of 5 In Progress" onProfile={()=>go("profile")}/>
+      <Header sub="⛳ MatchUp Golf" title={activeTrip?.name||"Sand Valley Ryder Cup"} detail={activeTrip?`Trip Code: ${activeTrip.join_code?.toUpperCase()}`:"June 5–8  ·  Round 2 of 5 In Progress"} onProfile={()=>go("profile")}/>
       <div style={{flex:1,padding:"18px 16px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         <TeamScoreCards ts={ts}/>
         {/* Live matches */}
@@ -2886,7 +2886,7 @@ function ProfileScreen({go, matches, playerRecords}){
 }
 
 // ─── TRIP SCREEN ──────────────────────────────────────────────────────────────
-function TripScreen({go, matches, playerRecords}){
+function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers}){
   const [section,setSection]=useState("Schedule");
   const myTrips=[
     {name:"Sand Valley Ryder Cup",dates:"June 5–8, 2026",players:6,status:"active",code:"SV2026"},
@@ -2895,7 +2895,10 @@ function TripScreen({go, matches, playerRecords}){
   ];
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
-      <Header sub="⛳ MatchUp Golf" title="Sand Valley Ryder Cup" detail="June 5–8, 2026 · Trip Code: SV2026" onProfile={()=>go("profile")}/>
+      <Header sub="⛳ MatchUp Golf"
+        title={activeTrip?.name || "Sand Valley Ryder Cup"}
+        detail={activeTrip ? `Trip Code: ${activeTrip.join_code?.toUpperCase()}` : "June 5–8, 2026 · Trip Code: SV2026"}
+        onProfile={()=>go("profile")}/>
       <div style={{background:C.white,padding:"10px 16px",display:"flex",gap:8,borderBottom:`1px solid ${C.light}`,overflowX:"auto"}}>
         {["Schedule","Players","Courses","My Trips","Settings"].map(s=>(<button key={s} onClick={()=>setSection(s)} style={{background:section===s?C.forest:"transparent",color:section===s?C.white:C.gray,border:`1.5px solid ${section===s?C.forest:C.light}`,borderRadius:20,padding:"6px 14px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>{s}</button>))}
       </div>
@@ -3167,8 +3170,10 @@ export default function App(){
   const [screen,          setScreen]         = useState("login");
   const [selectedMatchId, setSelectedMatchId]= useState(null);
   const [matches,         setMatches]        = useState(INITIAL_MATCHES);
-  const [session,         setSession]        = useState(null);   // Supabase auth session
-  const [activeTrip,      setActiveTrip]     = useState(null);   // trip joined/created
+  const [session,         setSession]        = useState(null);
+  const [activeTrip,      setActiveTrip]     = useState(null);
+  const [tripLoading,     setTripLoading]    = useState(false);
+  const [tripPlayers,     setTripPlayers]    = useState([]);
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -3178,19 +3183,72 @@ export default function App(){
 
   const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit"];
   const showNav    = navScreens.includes(screen);
+  const goMatch    = (matchId, dest) => { setSelectedMatchId(matchId); setScreen(dest); };
 
-  const goMatch = (matchId, dest) => { setSelectedMatchId(matchId); setScreen(dest); };
+  // Load real trip data from Supabase and populate app state
+  const loadTrip = useCallback(async (trip) => {
+    setTripLoading(true);
+    try {
+      // Load players for this trip
+      const players = await db.get("trip_players", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
+      setTripPlayers(players);
 
-  // Called when user successfully signs in, signs up, or joins by code
-  const handleAuth = ({ mode, session: s, trip }) => {
+      // Load matches for this trip
+      const dbMatches = await db.get("matches", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
+
+      if(dbMatches.length > 0){
+        // Convert DB matches to app format
+        const appMatches = dbMatches.map((m,i) => ({
+          id:         m.id,
+          round:      1,
+          day:        "Trip Day",
+          p1:         m.p1_label || "Team 1",
+          p2:         m.p2_label || "Team 2",
+          p1Keys:     (m.p1_player_ids||[]).map(pid => {
+            const p = players.find(pl=>pl.id===pid);
+            return p ? p.name.toLowerCase() : pid;
+          }),
+          p2Keys:     (m.p2_player_ids||[]).map(pid => {
+            const p = players.find(pl=>pl.id===pid);
+            return p ? p.name.toLowerCase() : pid;
+          }),
+          status:     m.status || "upcoming",
+          winnerSide: m.winner_side || null,
+          score:      m.score || null,
+          thru:       m.thru || 0,
+          liveScore:  m.live_score || null,
+          holeScores: {},
+        }));
+        setMatches(appMatches);
+      } else {
+        // New trip with no matches yet — keep demo data but note trip is loaded
+        // In a future version we'd show an empty state
+      }
+
+      setActiveTrip(trip);
+    } catch(e) {
+      console.error("Failed to load trip:", e);
+    }
+    setTripLoading(false);
+  }, []);
+
+  const handleAuth = async ({ mode, session: s, trip }) => {
     if(s) setSession(s);
-    if(trip) setActiveTrip(trip);
+    if(trip){
+      await loadTrip(trip);
+    } else if(s?.user?.id){
+      // Look for the user's most recent active trip
+      try {
+        const trips = await db.get("trips", `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
+        if(trips.length > 0) await loadTrip(trips[0]);
+      } catch(e){ /* no trip yet — show demo */ }
+    }
     setScreen("dashboard");
   };
 
-  const handleTripCreated = (trip) => {
-    setActiveTrip(trip);
-  };
+  const handleTripCreated = useCallback(async (trip) => {
+    await loadTrip(trip);
+  }, [loadTrip]);
 
   const matchProps = { matches, ts, playerRecords, updateMatch, goMatch };
 
@@ -3201,19 +3259,27 @@ export default function App(){
           <span>9:41</span><span>●●●</span><span>100%</span>
         </div>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflowY:"auto"}}>
-          {screen==="login"     &&<LoginScreen      onAuth={handleAuth}/>}
-          {screen==="dashboard" &&<DashboardScreen  go={setScreen} {...matchProps}/>}
-          {screen==="matches"   &&<MatchesScreen    go={setScreen} {...matchProps}/>}
-          {screen==="live"      &&<LiveMatchScreen  go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
-          {screen==="board"     &&<LeaderboardScreen go={setScreen} {...matchProps}/>}
-          {screen==="sidegames" &&<SideGamesScreen  go={setScreen}/>}
-          {screen==="trip"      &&<TripScreen       go={setScreen} {...matchProps}/>}
-          {screen==="setup"     &&<TripSetupScreen  go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
-          {screen==="profile"   &&<ProfileScreen    go={setScreen} {...matchProps}/>}
-          {screen==="matchedit" &&<MatchEditScreen  go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
-          {screen==="payouts"   &&<PayoutsScreen    go={setScreen} {...matchProps}/>}
+          {tripLoading ? (
+            <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+              <div style={{fontSize:36}}>⛳</div>
+              <div style={{fontSize:16,fontWeight:700,color:C.forest}}>Loading Trip…</div>
+              <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Getting your data from the cloud</div>
+            </div>
+          ) : (<>
+            {screen==="login"     &&<LoginScreen      onAuth={handleAuth}/>}
+            {screen==="dashboard" &&<DashboardScreen  go={setScreen} activeTrip={activeTrip} {...matchProps}/>}
+            {screen==="matches"   &&<MatchesScreen    go={setScreen} {...matchProps}/>}
+            {screen==="live"      &&<LiveMatchScreen  go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
+            {screen==="board"     &&<LeaderboardScreen go={setScreen} {...matchProps}/>}
+            {screen==="sidegames" &&<SideGamesScreen  go={setScreen}/>}
+            {screen==="trip"      &&<TripScreen       go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} {...matchProps}/>}
+            {screen==="setup"     &&<TripSetupScreen  go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
+            {screen==="profile"   &&<ProfileScreen    go={setScreen} {...matchProps}/>}
+            {screen==="matchedit" &&<MatchEditScreen  go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
+            {screen==="payouts"   &&<PayoutsScreen    go={setScreen} {...matchProps}/>}
+          </>)}
         </div>
-        {showNav&&<BottomNav screen={screen} set={setScreen} liveCount={matches.filter(m=>m.status==="live").length}/>}
+        {showNav&&!tripLoading&&<BottomNav screen={screen} set={setScreen} liveCount={matches.filter(m=>m.status==="live").length}/>}
       </div>
     </div>
   );
