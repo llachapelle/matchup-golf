@@ -2618,7 +2618,7 @@ function PayoutsScreen({go, matches, ts, playerRecords}){
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
-function ProfileScreen({go, matches, playerRecords}){
+function ProfileScreen({go, matches, playerRecords, onSignOut, session}){
   const [tab,setTab]=useState("Trip");
   const [hcpSource,setHcpSource]=useState("ghin");
   const [manualIndex,setManualIndex]=useState("8.4");
@@ -2880,12 +2880,20 @@ function ProfileScreen({go, matches, playerRecords}){
             </div>
           </>
         )}
+
+        {/* Sign Out */}
+        {onSignOut&&(
+          <button onClick={onSignOut}
+            style={{width:"100%",background:"transparent",color:C.red,
+              border:`1.5px solid ${C.redBg}`,borderRadius:14,padding:14,
+              fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",marginTop:4}}>
+            Sign Out
+          </button>
+        )}
       </div>
     </div>
   );
 }
-
-// ─── TRIP SCREEN ──────────────────────────────────────────────────────────────
 function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch}){
   const [section,   setSection]  = useState("Players");
   const [addingPlayer, setAddingPlayer] = useState(false);
@@ -3140,6 +3148,8 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
   const [p1Players, setP1Players] = useState([]);
   const [p2Players, setP2Players] = useState([]);
   const [format,    setFormat]    = useState("Best Ball");
+  const [hcpMode,   setHcpMode]   = useState("whs");   // whs | custom | off
+  const [hcpPct,    setHcpPct]    = useState(90);       // custom percentage
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState("");
 
@@ -3227,6 +3237,38 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Handicap settings */}
+        <div style={card()}>
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Handicaps</div>
+          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>
+            {hcpMode==="whs"    ? `WHS: ${selectedFormat?.whs||"90%"} of each player's course handicap (auto-calculated)`
+            : hcpMode==="custom"? `Custom: ${hcpPct}% of each player's course handicap`
+            : "Off: gross scores only, no handicap strokes applied"}
+          </div>
+          <div style={{display:"flex",gap:6,marginBottom:hcpMode==="custom"?12:0}}>
+            {[["whs","WHS (auto)"],["custom","Custom %"],["off","Off (gross)"]].map(([id,label])=>(
+              <button key={id} onClick={()=>setHcpMode(id)}
+                style={{flex:1,background:hcpMode===id?C.forest:C.smoke,
+                  color:hcpMode===id?C.white:C.gray,
+                  border:`1.5px solid ${hcpMode===id?C.forest:C.light}`,
+                  borderRadius:10,padding:"8px 4px",fontSize:11,
+                  fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {hcpMode==="custom"&&(
+            <div style={{display:"flex",alignItems:"center",gap:12,marginTop:8}}>
+              <input type="range" min={0} max={100} step={5} value={hcpPct}
+                onChange={e=>setHcpPct(parseInt(e.target.value))}
+                style={{flex:1,accentColor:C.forest}}/>
+              <div style={{fontSize:18,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif",minWidth:44,textAlign:"right"}}>
+                {hcpPct}%
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Side 1 */}
@@ -3538,7 +3580,6 @@ function TripSetupScreen({go, session, onTripCreated}){
     </div>
   );
 }
-
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App(){
   const [screen,          setScreen]         = useState("login");
@@ -3548,6 +3589,7 @@ export default function App(){
   const [activeTrip,      setActiveTrip]     = useState(null);
   const [tripLoading,     setTripLoading]    = useState(false);
   const [tripPlayers,     setTripPlayers]    = useState([]);
+  const [appReady,        setAppReady]       = useState(false); // false until we've checked storage
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -3559,33 +3601,21 @@ export default function App(){
   const showNav    = navScreens.includes(screen);
   const goMatch    = (matchId, dest) => { setSelectedMatchId(matchId); setScreen(dest); };
 
-  // Load real trip data from Supabase and populate app state
   const loadTrip = useCallback(async (trip) => {
     setTripLoading(true);
     try {
-      // Load players for this trip
       const players = await db.get("trip_players", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
       setTripPlayers(players);
-
-      // Load matches for this trip
       const dbMatches = await db.get("matches", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
-
       if(dbMatches.length > 0){
-        // Convert DB matches to app format
-        const appMatches = dbMatches.map((m,i) => ({
+        const appMatches = dbMatches.map(m => ({
           id:         m.id,
           round:      1,
           day:        "Trip Day",
           p1:         m.p1_label || "Team 1",
           p2:         m.p2_label || "Team 2",
-          p1Keys:     (m.p1_player_ids||[]).map(pid => {
-            const p = players.find(pl=>pl.id===pid);
-            return p ? p.name.toLowerCase() : pid;
-          }),
-          p2Keys:     (m.p2_player_ids||[]).map(pid => {
-            const p = players.find(pl=>pl.id===pid);
-            return p ? p.name.toLowerCase() : pid;
-          }),
+          p1Keys:     (m.p1_player_ids||[]).map(pid => { const p=players.find(pl=>pl.id===pid); return p?p.name.toLowerCase():pid; }),
+          p2Keys:     (m.p2_player_ids||[]).map(pid => { const p=players.find(pl=>pl.id===pid); return p?p.name.toLowerCase():pid; }),
           status:     m.status || "upcoming",
           winnerSide: m.winner_side || null,
           score:      m.score || null,
@@ -3594,31 +3624,68 @@ export default function App(){
           holeScores: {},
         }));
         setMatches(appMatches);
-      } else {
-        // New trip with no matches yet — keep demo data but note trip is loaded
-        // In a future version we'd show an empty state
       }
-
       setActiveTrip(trip);
-    } catch(e) {
-      console.error("Failed to load trip:", e);
-    }
+    } catch(e){ console.error("Failed to load trip:", e); }
     setTripLoading(false);
   }, []);
 
+  // ── On app start: restore session from localStorage ──────────────────────────
+  // Session is valid for ~1 year (Supabase default). We check it's not expired
+  // then restore the user straight to dashboard without re-logging in.
+  useEffect(()=>{
+    const restore = async () => {
+      try {
+        const stored = localStorage.getItem("matchup_session");
+        if(stored){
+          const s = JSON.parse(stored);
+          // Check token isn't expired (exp is in seconds)
+          const exp = s.expires_at || (s.user?.exp);
+          const isExpired = exp && (exp * 1000) < Date.now();
+          if(!isExpired && s.access_token){
+            setSession(s);
+            // Try to load their most recent active trip
+            try {
+              const trips = await db.get("trips",
+                `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
+              if(trips.length > 0) await loadTrip(trips[0]);
+              setScreen("dashboard");
+            } catch(e){ setScreen("dashboard"); }
+            setAppReady(true); return;
+          }
+        }
+      } catch(e){ localStorage.removeItem("matchup_session"); }
+      setAppReady(true); // no stored session — show login
+    };
+    restore();
+  }, [loadTrip]);
+
   const handleAuth = async ({ mode, session: s, trip }) => {
-    if(s) setSession(s);
+    if(s){
+      setSession(s);
+      // Persist session — Supabase tokens last ~1 year by default
+      try { localStorage.setItem("matchup_session", JSON.stringify(s)); } catch(e){}
+    }
     if(trip){
       await loadTrip(trip);
     } else if(s?.user?.id){
-      // Look for the user's most recent active trip
       try {
-        const trips = await db.get("trips", `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
+        const trips = await db.get("trips",
+          `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
         if(trips.length > 0) await loadTrip(trips[0]);
-      } catch(e){ /* no trip yet — show demo */ }
+      } catch(e){}
     }
     setScreen("dashboard");
   };
+
+  const handleSignOut = useCallback(() => {
+    localStorage.removeItem("matchup_session");
+    setSession(null);
+    setActiveTrip(null);
+    setTripPlayers([]);
+    setMatches(INITIAL_MATCHES);
+    setScreen("login");
+  }, []);
 
   const handleTripCreated = useCallback(async (trip) => {
     await loadTrip(trip);
@@ -3637,11 +3704,18 @@ export default function App(){
           <span>9:41</span><span>●●●</span><span>100%</span>
         </div>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflowY:"auto"}}>
-          {tripLoading ? (
+          {!appReady ? (
+            // Splash while checking stored session
+            <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,background:`linear-gradient(165deg,${C.forest},${C.turf})`}}>
+              <div style={{fontSize:64}}>⛳</div>
+              <div style={{fontSize:22,fontWeight:700,color:C.white}}>MatchUp Golf</div>
+              <div style={{fontSize:13,color:"rgba(255,255,255,.6)",fontFamily:"Arial,sans-serif"}}>Loading…</div>
+            </div>
+          ) : tripLoading ? (
             <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
               <div style={{fontSize:36}}>⛳</div>
               <div style={{fontSize:16,fontWeight:700,color:C.forest}}>Loading Trip…</div>
-              <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Getting your data from the cloud</div>
+              <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Getting your data</div>
             </div>
           ) : (<>
             {screen==="login"       &&<LoginScreen        onAuth={handleAuth}/>}
@@ -3653,12 +3727,12 @@ export default function App(){
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} {...matchProps}/>}
             {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onMatchCreated={handleMatchCreated}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
-            {screen==="profile"     &&<ProfileScreen      go={setScreen} {...matchProps}/>}
+            {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
             {screen==="payouts"     &&<PayoutsScreen      go={setScreen} {...matchProps}/>}
           </>)}
         </div>
-        {showNav&&!tripLoading&&<BottomNav screen={screen} set={setScreen} liveCount={matches.filter(m=>m.status==="live").length}/>}
+        {showNav&&!tripLoading&&appReady&&<BottomNav screen={screen} set={setScreen} liveCount={matches.filter(m=>m.status==="live").length}/>}
       </div>
     </div>
   );
