@@ -521,26 +521,26 @@ function LoginScreen({onAuth}){
     setLoading(true); setError("");
     try {
       const res = await auth.signUp(email, pw, name);
-      if(res.error) throw new Error(res.error.message||res.error.msg||JSON.stringify(res.error));
-      // Supabase returns user+session when confirmation is off, or just user when on
-      // Either way if we got a user back, treat as success
-      if(res.user || res.access_token || res.id) {
-        // If we have a session token use it, otherwise sign in immediately
-        if(res.access_token){
-          onAuth({ mode:"auth", session: res });
-        } else {
-          // Auto sign in after signup
-          const signInRes = await auth.signIn(email, pw);
-          if(signInRes.error) throw new Error(signInRes.error.message||"Signed up! Now try signing in.");
+      // Show raw response for debugging
+      const resStr = JSON.stringify(res).slice(0,200);
+      if(res.error) throw new Error(res.error.message||res.error.msg||resStr);
+      // Success if we got any of these
+      if(res.access_token){
+        onAuth({ mode:"auth", session: res });
+      } else if(res.user || res.id) {
+        // Have user but no token — try immediate sign in
+        const signInRes = await auth.signIn(email, pw);
+        if(signInRes.access_token){
           onAuth({ mode:"auth", session: signInRes });
+        } else {
+          setError("Account created! Please use Sign In tab to log in.");
         }
       } else {
-        throw new Error("Signup failed — please try again");
+        throw new Error("Unexpected response: " + resStr);
       }
     } catch(e){
       const msg = e.message||"";
-      if(msg.includes("allowlist")||msg.includes("403")) setError("Connection blocked — check Supabase allowed origins");
-      else if(msg.includes("already registered")) setError("Email already registered — try Sign In instead");
+      if(msg.includes("already registered")||msg.includes("already exists")) setError("Email already registered — use Sign In tab");
       else setError(msg||"Sign up failed");
     }
     setLoading(false);
