@@ -46,7 +46,12 @@ const auth = {
       headers:{"Content-Type":"application/json","apikey":SUPA_KEY},
       body:JSON.stringify({email, password, data:{display_name:displayName}})
     });
-    return r.json();
+    const json = await r.json();
+    // Supabase v2 wraps response: { user, session: { access_token, ... } }
+    // Normalize to flat shape our code expects
+    if(json.session) return { ...json.session, user: json.user };
+    if(json.user)    return { user: json.user, access_token: null };
+    return json;
   },
 
   async signIn(email, password){
@@ -55,7 +60,10 @@ const auth = {
       headers:{"Content-Type":"application/json","apikey":SUPA_KEY},
       body:JSON.stringify({email, password})
     });
-    return r.json();
+    const json = await r.json();
+    // v2 token endpoint returns flat { access_token, user, ... } directly
+    if(json.session) return { ...json.session, user: json.user };
+    return json;
   },
 
   async signOut(token){
@@ -514,12 +522,25 @@ function LoginScreen({onAuth}){
     try {
       const res = await auth.signUp(email, pw, name);
       if(res.error) throw new Error(res.error.message||res.error.msg||JSON.stringify(res.error));
-      if(!res.user && !res.access_token) throw new Error("Signup failed — check Supabase Auth settings (disable email confirmation)");
-      onAuth({ mode:"auth", session: res });
+      // Supabase returns user+session when confirmation is off, or just user when on
+      // Either way if we got a user back, treat as success
+      if(res.user || res.access_token || res.id) {
+        // If we have a session token use it, otherwise sign in immediately
+        if(res.access_token){
+          onAuth({ mode:"auth", session: res });
+        } else {
+          // Auto sign in after signup
+          const signInRes = await auth.signIn(email, pw);
+          if(signInRes.error) throw new Error(signInRes.error.message||"Signed up! Now try signing in.");
+          onAuth({ mode:"auth", session: signInRes });
+        }
+      } else {
+        throw new Error("Signup failed — please try again");
+      }
     } catch(e){
       const msg = e.message||"";
-      if(msg.includes("allowlist")||msg.includes("403")) setError("Connection blocked — add your URL to Supabase allowed origins in Settings → API");
-      else if(msg.includes("confirmation")) setError("Check email for confirmation link, or disable email confirmation in Supabase Auth settings");
+      if(msg.includes("allowlist")||msg.includes("403")) setError("Connection blocked — check Supabase allowed origins");
+      else if(msg.includes("already registered")) setError("Email already registered — try Sign In instead");
       else setError(msg||"Sign up failed");
     }
     setLoading(false);
