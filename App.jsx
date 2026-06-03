@@ -3159,7 +3159,7 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
     }
   };
 
-  const p1Label = p1Players.length ? p1Players.map(p=>p.name).join(" / ") : "Select players…";
+  const selectedFormat = MATCH_FORMATS.find(f=>f.name===format) || MATCH_FORMATS[0];
   const p2Label = p2Players.length ? p2Players.map(p=>p.name).join(" / ") : "Select players…";
 
   const createMatch = async () => {
@@ -3206,16 +3206,24 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
       <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif"}}>{error}</div>}
 
-        {/* Format picker */}
+        {/* Format picker — all 13 Ryder Cup formats */}
         <div style={card()}>
-          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Format</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-            {["Best Ball","Alt Shot","Singles","Scramble","Stroke Play"].map(f=>(
-              <button key={f} onClick={()=>setFormat(f)}
-                style={{background:format===f?C.forest:C.smoke,color:format===f?C.white:C.gray,
-                  border:`1.5px solid ${format===f?C.forest:C.light}`,borderRadius:20,
-                  padding:"6px 14px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
-                {f}
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Format</div>
+          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>All formats earn Ryder Cup points. WHS handicaps applied per format rules.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {MATCH_FORMATS.map(f=>(
+              <button key={f.id} onClick={()=>setFormat(f.name)}
+                style={{background:format===f.name?C.forest:C.smoke,
+                  color:format===f.name?C.white:C.charcoal,
+                  border:`1.5px solid ${format===f.name?C.forest:C.light}`,
+                  borderRadius:12,padding:"10px 14px",cursor:"pointer",
+                  display:"flex",justifyContent:"space-between",alignItems:"center",
+                  textAlign:"left"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,fontFamily:"Arial,sans-serif"}}>{f.name}</div>
+                  <div style={{fontSize:11,fontFamily:"Arial,sans-serif",opacity:.75,marginTop:2}}>{f.desc.slice(0,55)}…</div>
+                </div>
+                <div style={{fontSize:10,fontFamily:"Arial,sans-serif",opacity:.7,marginLeft:8,flexShrink:0}}>{f.whs}</div>
               </button>
             ))}
           </div>
