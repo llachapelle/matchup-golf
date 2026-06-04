@@ -3193,11 +3193,17 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                       {isLive&&<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:3}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE</span></div>}
                       <div style={{fontSize:13,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{m.p1}</div>
                       <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>vs {m.p2}</div>
+                      {/* Format, course, tee details */}
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
+                        {m.format&&<span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>}
+                        {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name} Tees`:""}</span>}
+                        {m.hcp_mode&&m.hcp_mode!=="whs"&&<span style={{...pill(C.amberBg,C.amber),fontSize:10}}>{m.hcp_mode==="off"?"No HCP":`HCP ${m.hcp_pct}%`}</span>}
+                      </div>
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:8}}>
                       {isDone&&<div style={{fontSize:13,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif"}}>{m.score}</div>}
                       {isLive&&<div style={{fontSize:13,fontWeight:700,color:scoreColor(m.liveScore),fontFamily:"Arial,sans-serif"}}>{m.liveScore}</div>}
-                      {m.status==="upcoming"&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>⏰ Upcoming</div>}
+                      {m.status==="upcoming"&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>⏰</div>}
                       <button onClick={()=>goCreateMatch(m)}
                         style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
                         Edit
@@ -3469,8 +3475,8 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
     isEdit ? displayPlayers.filter(p=>(editMatch.p2Keys||[]).includes(p.name?.toLowerCase())) : []
   );
   const [format,         setFormat]        = useState(isEdit ? (editMatch.format||"Best Ball") : "Best Ball");
-  const [hcpMode,        setHcpMode]       = useState("whs");
-  const [hcpPct,         setHcpPct]        = useState(90);
+  const [hcpMode,        setHcpMode]       = useState(isEdit ? (editMatch.hcp_mode||"whs") : "whs");
+  const [hcpPct,         setHcpPct]        = useState(isEdit ? (editMatch.hcp_pct||90) : 90);
   const [selectedCourse, setSelectedCourse]= useState(null);
   const [selectedTee,    setSelectedTee]   = useState(null);
   const [saving,         setSaving]        = useState(false);
@@ -3504,14 +3510,17 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
         p1_player_ids: p1Players.map(p=>p.id),
         p2_player_ids: p2Players.map(p=>p.id),
         format:        format,
+        hcp_mode:      hcpMode,
+        hcp_pct:       hcpMode==="custom" ? hcpPct : (hcpMode==="off" ? 0 : null),
         status:        isEdit ? (editMatch.status||"upcoming") : "upcoming",
         winner_side:   isEdit ? editMatch.winnerSide : null,
         thru:          isEdit ? (editMatch.thru||0) : 0,
-        course_name:   selectedCourse?.name || null,
-        tee_name:      selectedTee?.name || null,
-        slope:         selectedTee?.slope ? parseInt(selectedTee.slope) : null,
-        rating:        selectedTee?.rating ? parseFloat(selectedTee.rating) : null,
-        par:           selectedTee?.par ? parseInt(selectedTee.par) : null,
+        // Only update course/tee if user actually selected one — preserve existing on edit
+        course_name:   selectedCourse?.name || (isEdit ? editMatch.course_name : null),
+        tee_name:      selectedTee?.name    || (isEdit ? editMatch.tee_name    : null),
+        slope:         selectedTee?.slope   ? parseInt(selectedTee.slope)    : (isEdit ? editMatch.slope  : null),
+        rating:        selectedTee?.rating  ? parseFloat(selectedTee.rating) : (isEdit ? editMatch.rating : null),
+        par:           selectedTee?.par     ? parseInt(selectedTee.par)      : (isEdit ? editMatch.par    : null),
       };
       if(activeTrip) matchData.trip_id = activeTrip.id;
 
@@ -3523,6 +3532,8 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
           p1_player_ids: matchData.p1_player_ids,
           p2_player_ids: matchData.p2_player_ids,
           format:        format,
+          hcp_mode:      matchData.hcp_mode,
+          hcp_pct:       matchData.hcp_pct,
           course_name:   matchData.course_name,
           tee_name:      matchData.tee_name,
           slope:         matchData.slope,
@@ -3536,6 +3547,8 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
           p1Keys:      p1Players.map(p=>p.name.toLowerCase()),
           p2Keys:      p2Players.map(p=>p.name.toLowerCase()),
           format:      format,
+          hcp_mode:    hcpMode,
+          hcp_pct:     hcpMode==="custom" ? hcpPct : null,
           course_name: matchData.course_name,
           tee_name:    matchData.tee_name,
           slope:       matchData.slope,
@@ -4104,6 +4117,8 @@ export default function App(){
           thru:        m.thru        || 0,
           liveScore:   m.live_score  || null,
           format:      m.format      || "Best Ball",
+          hcp_mode:    m.hcp_mode    || "whs",
+          hcp_pct:     m.hcp_pct     || 90,
           course_name: m.course_name || null,
           tee_name:    m.tee_name    || null,
           slope:       m.slope       || null,
