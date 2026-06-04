@@ -741,6 +741,7 @@ function MatchesScreen({go, goMatch, matches, ts}){
               const isExpanded = expandedMatch===m.id;
               const handleTap = () => {
                 if(m.status==="live")      { goMatch(m.id,"live"); return; }
+                if(m.status==="upcoming")  { goMatch(m.id,"live"); return; } // start scoring
                 if(m.status==="completed") { setExpandedMatch(isExpanded?null:m.id); }
               };
 
@@ -1507,44 +1508,84 @@ function MatchEditScreen({go, matchId, matches, updateMatch}){
 
 
 // ─── LIVE MATCH ───────────────────────────────────────────────────────────────
-function LiveMatchScreen({go, matchId, matches, updateMatch}){
-  // Find the target match — prefer the specified matchId, fall back to first live
-  const match  = matches.find(m=>m.id===matchId && m.status==="live")
-              || matches.find(m=>m.status==="live")
-              || matches[0];
-  const round  = ROUNDS.find(r=>r.id===match.round) || ROUNDS[0];
-  const course = COURSES[round.courseId] || COURSES.mammoth;
-  const format = round.format || "Best Ball";
+function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, activeTrip}){
+  const match = matches.find(m=>m.id===matchId)
+             || matches.find(m=>m.status==="live")
+             || matches[0];
 
-  // Build only the RAW players actually in this match
-  const allKeys    = [...(match.p1Keys||[]),...(match.p2Keys||[])];
-  const rawInMatch = RAW.filter(p=>allKeys.includes(p.key));
-  const players    = buildPlayers(rawInMatch, course, format);
+  // Auto-start upcoming match when opened
+  const effectiveMatch = match?.status === "upcoming"
+    ? {...match, status:"live"}
+    : match;
+
+  // Use effectiveMatch for all match data (auto-starts upcoming matches)
+  const match = effectiveMatch;
+  const course = {
+    slope:       match.slope       || COURSES.mammoth.slope,
+    rating:      match.rating      || COURSES.mammoth.rating,
+    par:         match.par         || COURSES.mammoth.par,
+    strokeIndex: COURSES.mammoth.strokeIndex, // hole-by-hole SI (same layout for now)
+    pars:        COURSES.mammoth.pars,
+    name:        match.course_name || COURSES.mammoth.name,
+  };
+  const format = match.format || "Best Ball";
+
+  // ── Players: use real tripPlayers if available ────────────────────────────
+  // Build RAW-compatible player objects from tripPlayers for WHS engine
+  const buildRealPlayers = () => {
+    const allKeys = [...(match.p1Keys||[]), ...(match.p2Keys||[])];
+    if(tripPlayers && tripPlayers.length > 0){
+      // Match players by name (lowercase) since p1Keys/p2Keys store lowercase names
+      return tripPlayers
+        .filter(tp => allKeys.includes(tp.name.toLowerCase()))
+        .map(tp => ({
+          key:   tp.name.toLowerCase(),
+          name:  tp.name,
+          index: tp.hcp_index || 0,
+          team:  tp.team || "red",
+          ghin:  false,
+        }));
+    }
+    // Fall back to demo RAW players
+    return RAW.filter(p => allKeys.includes(p.key));
+  };
+
+  const realPlayers = buildRealPlayers();
+  const allKeys     = [...(match.p1Keys||[]),...(match.p2Keys||[])];
+  const players     = buildPlayers(realPlayers, course, format);
   const playerByKey = Object.fromEntries(players.map(p=>[p.key,p]));
 
   // RAW players per side
   const p1RawPlayers = players.filter(p=>(match.p1Keys||[]).includes(p.key));
   const p2RawPlayers = players.filter(p=>(match.p2Keys||[]).includes(p.key));
 
-  // External (guest) players from pairing strings
+  // External (guest) players — names in pairing string not in p1Keys/p2Keys
   const parseExt = (pairingStr, rawKeys) => {
-    const rawNames = rawKeys.map(k=>RAW.find(p=>p.key===k)?.name||"");
+    const rawNames = rawKeys.map(k=>realPlayers.find(p=>p.key===k)?.name||"");
     return pairingStr.split("/").map(n=>n.trim())
       .filter(n=>n&&!rawNames.some(rn=>rn.toLowerCase()===n.toLowerCase()))
-      .map(n=>({key:n.toLowerCase(), name:n, isExternal:true}));
+      .map(n=>{
+        // Check if this guest has handicap data in tripPlayers
+        const tp = tripPlayers?.find(p=>p.name.toLowerCase()===n.toLowerCase());
+        return {
+          key:        n.toLowerCase(),
+          name:       n,
+          index:      tp?.hcp_index || null,
+          isExternal: true,
+        };
+      });
   };
   const p1ExtPlayers = parseExt(match.p1||"", match.p1Keys||[]);
   const p2ExtPlayers = parseExt(match.p2||"", match.p2Keys||[]);
 
-  // All players per side (RAW first for net scoring, then externals gross-only)
   const p1Players = [...p1RawPlayers, ...p1ExtPlayers];
   const p2Players = [...p2RawPlayers, ...p2ExtPlayers];
 
-  // Determine team colors for each side — look at RAW players first, then fallback
+  // Team colors from real player data
   const p1Team = p1RawPlayers.length ? p1RawPlayers[0].team
-    : (match.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "red";
+    : realPlayers.find(p=>(match.p1Keys||[]).includes(p.key))?.team || "red";
   const p2Team = p2RawPlayers.length ? p2RawPlayers[0].team
-    : (match.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "blue";
+    : realPlayers.find(p=>(match.p2Keys||[]).includes(p.key))?.team || "blue";
 
   // Seed holeResults from match.holeScores if available (for already-started live matches)
   // holeNum starts at match.thru (where scoring left off) or 1
@@ -1679,55 +1720,126 @@ function LiveMatchScreen({go, matchId, matches, updateMatch}){
     else setShowSummary(true);
   };
 
-  const submitHole = () => {
+  const submitHole = async () => {
     const winner = computeHoleWinner(curScores);
-    // Build new results synchronously so we can compute status from them immediately
-    const newResults = {...holeResults, [holeNum]: winner};
+    const newResults   = {...holeResults, [holeNum]: winner};
+    const newHoleScores= {...holeScores,  [holeNum]: {...curScores}};
     setHoleResults(newResults);
-    // Build new holeScores — merge into LOCAL holeScores state, not stale match prop
-    const newHoleScores = {...holeScores, [holeNum]: {...curScores}};
     setHoleScores(newHoleScores);
-    // Compute live score from new results (not from stale state)
     const newStatus = computeStatusFromResults(newResults);
-    // Save to root — use local newHoleScores so nothing is lost
+
+    // Save to local state
     updateMatch(match.id, {
       thru:       holeNum,
       liveScore:  newStatus.text,
       holeScores: newHoleScores,
+      status:     "live",
     });
+
+    // Save hole scores to Supabase (one row per player per hole)
+    if(activeTrip && match.id && typeof match.id === "string" && match.id.length > 10){
+      try {
+        const holeRows = Object.entries(curScores)
+          .filter(([,v])=>v&&parseInt(v)>0)
+          .map(([key, gross])=>{
+            const tp = tripPlayers?.find(p=>p.name.toLowerCase()===key);
+            return {
+              match_id:    match.id,
+              player_id:   tp?.id || key,
+              hole_number: holeNum,
+              gross_score: parseInt(gross),
+            };
+          });
+        if(holeRows.length > 0){
+          // Upsert — update if already exists
+          await fetch(`${SUPA_URL}/rest/v1/hole_scores`, {
+            method: "POST",
+            headers: {...db.headers, "Prefer":"resolution=merge-duplicates"},
+            body: JSON.stringify(holeRows),
+          });
+        }
+        // Update match status in DB
+        await db.patch("matches", `id=eq.${match.id}`, {
+          thru:       holeNum,
+          live_score: newStatus.text,
+          status:     "live",
+        });
+      } catch(e){ console.warn("Failed to save hole to DB:", e.message); }
+    }
+
     setShowUndo(true);
-    setTimeout(()=>setShowUndo(false),5000);
+    setTimeout(()=>setShowUndo(false), 5000);
     advanceHole();
   };
 
-  const quickWin = result => {
+  const quickWin = async result => {
     const newResults = {...holeResults, [holeNum]: result};
     setHoleResults(newResults);
-    const newStatus = computeStatusFromResults(newResults);
-    updateMatch(match.id, {thru: holeNum, liveScore: newStatus.text});
+    const newStatus  = computeStatusFromResults(newResults);
+    updateMatch(match.id, {thru: holeNum, liveScore: newStatus.text, status:"live"});
+    if(activeTrip && match.id && typeof match.id === "string" && match.id.length > 10){
+      try {
+        await db.patch("matches", `id=eq.${match.id}`, {
+          thru: holeNum, live_score: newStatus.text, status:"live"
+        });
+      } catch(e){}
+    }
     setShowUndo(true);
-    setTimeout(()=>setShowUndo(false),5000);
+    setTimeout(()=>setShowUndo(false), 5000);
     advanceHole();
   };
 
-  const undoHole = () => {
+  const undoHole = async () => {
     const last = holeNum-1;
     if(last<1) return;
-    const newResults = {...holeResults};
-    delete newResults[last];
+    const newResults    = {...holeResults};  delete newResults[last];
+    const newHoleScores = {...holeScores};   delete newHoleScores[last];
     setHoleResults(newResults);
     setHoleNum(last);
     setShowUndo(false);
-    const newStatus = computeStatusFromResults(newResults);
-    // Remove the undone hole's scores from holeScores too
-    const newHoleScores = {...holeScores};
-    delete newHoleScores[last];
     setHoleScores(newHoleScores);
+    const newStatus = computeStatusFromResults(newResults);
     updateMatch(match.id, {
       thru:       Math.max(0, last-1),
       liveScore:  newStatus.text,
       holeScores: newHoleScores,
     });
+    if(activeTrip && match.id && typeof match.id === "string" && match.id.length > 10){
+      try {
+        // Remove undone hole scores from DB
+        const playerKeys = [...(match.p1Keys||[]),...(match.p2Keys||[])];
+        const tpIds = playerKeys.map(k=>tripPlayers?.find(p=>p.name.toLowerCase()===k)?.id).filter(Boolean);
+        if(tpIds.length > 0){
+          await fetch(`${SUPA_URL}/rest/v1/hole_scores?match_id=eq.${match.id}&hole_number=eq.${last}&player_id=in.(${tpIds.join(",")})`, {
+            method:"DELETE", headers: db.headers,
+          });
+        }
+        await db.patch("matches", `id=eq.${match.id}`, {
+          thru: Math.max(0, last-1), live_score: newStatus.text,
+        });
+      } catch(e){}
+    }
+  };
+
+  // Save final match result to Supabase when match completes
+  const finishMatch = async (finalStatus) => {
+    updateMatch(match.id, {
+      winnerSide: finalStatus.winnerSide,
+      score:      finalStatus.text,
+      status:     "completed",
+      thru:       18,
+    });
+    if(activeTrip && match.id && typeof match.id === "string" && match.id.length > 10){
+      try {
+        await db.patch("matches", `id=eq.${match.id}`, {
+          winner_side: finalStatus.winnerSide,
+          score:       finalStatus.text,
+          status:      "completed",
+          thru:        18,
+          live_score:  finalStatus.text,
+        });
+      } catch(e){ console.warn("Failed to save match result:", e.message); }
+    }
   };
 
   if(showSummary){
@@ -1736,7 +1848,7 @@ function LiveMatchScreen({go, matchId, matches, updateMatch}){
       <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
         <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"20px 24px 24px"}}>
           <div style={{color:"rgba(255,255,255,.6)",fontSize:11,fontFamily:"Arial,sans-serif",letterSpacing:"1.2px",textTransform:"uppercase",marginBottom:4}}>Round Complete</div>
-          <div style={{color:C.white,fontSize:22,fontWeight:700}}>{round.name} · {course.name}</div>
+          <div style={{color:C.white,fontSize:22,fontWeight:700}}>{match.p1} vs {match.p2} · {course.name}</div>
         </div>
         <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:12,overflowY:"auto"}}>
           <div style={{...card({textAlign:"center",padding:"24px 16px"})}}>
@@ -1755,14 +1867,15 @@ function LiveMatchScreen({go, matchId, matches, updateMatch}){
               })}
             </div>
           </div>
-          <button onClick={()=>{
-            // Mark match as completed with final result
+          <button onClick={async ()=>{
             const p1w=Object.values(holeResults).filter(v=>v==="p1").length;
             const p2w=Object.values(holeResults).filter(v=>v==="p2").length;
+            const ties=Object.values(holeResults).filter(v=>v==="tie").length;
             const ws=p1w>p2w?"p1":p2w>p1w?"p2":"halve";
-            const diff=Math.abs(p1w-p2w), rem=18-(p1w+p2w+Object.values(holeResults).filter(v=>v==="tie").length);
+            const diff=Math.abs(p1w-p2w);
+            const rem=18-(p1w+p2w+ties);
             const scoreStr=ws==="halve"?"All Square":diff>rem?`${diff}&${rem}`:"1UP";
-            updateMatch(match.id,{status:"completed",winnerSide:ws,score:scoreStr,thru:18});
+            await finishMatch({winnerSide:ws, text:scoreStr});
             go("board");
           }} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.25)"})}>
             Save & View Leaderboard →
@@ -1789,7 +1902,9 @@ function LiveMatchScreen({go, matchId, matches, updateMatch}){
             </button>
           </div>
         </div>
-        <div style={{color:"rgba(255,255,255,.65)",fontSize:11,fontFamily:"Arial,sans-serif",marginBottom:3}}>{round.name} · {course.name} · {format}</div>
+          <div style={{color:"rgba(255,255,255,.65)",fontSize:11,fontFamily:"Arial,sans-serif",marginBottom:3}}>
+            {course.name}{match.tee_name ? ` · ${match.tee_name} Tees` : ""} · {format}
+          </div>
         <div style={{color:C.white,fontSize:14,fontWeight:700,fontFamily:"Arial,sans-serif"}}>{match.p1} <span style={{color:"rgba(255,255,255,.45)"}}>vs</span> {match.p2}</div>
         <div style={{fontSize:22,fontWeight:700,color:status.color,marginTop:6,letterSpacing:"-.5px"}}>
           {status.text}
@@ -4099,7 +4214,7 @@ export default function App(){
             {screen==="login"       &&<LoginScreen        onAuth={handleAuth}/>}
             {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="matches"     &&<MatchesScreen      go={setScreen} {...matchProps}/>}
-            {screen==="live"        &&<LiveMatchScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
+            {screen==="live"        &&<LiveMatchScreen    go={setScreen} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="board"       &&<LeaderboardScreen  go={setScreen} {...matchProps}/>}
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
