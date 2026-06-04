@@ -1509,22 +1509,19 @@ function MatchEditScreen({go, matchId, matches, updateMatch}){
 
 // ─── LIVE MATCH ───────────────────────────────────────────────────────────────
 function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, activeTrip}){
-  const match = matches.find(m=>m.id===matchId)
-             || matches.find(m=>m.status==="live")
-             || matches[0];
+  // effectiveMatch: auto-starts upcoming matches as live when scorer taps in
+  const rawMatch = matches.find(m=>m.id===matchId)
+               || matches.find(m=>m.status==="live")
+               || matches[0];
+  const match = rawMatch?.status === "upcoming"
+    ? {...rawMatch, status:"live"}
+    : rawMatch;
 
-  // Auto-start upcoming match when opened
-  const effectiveMatch = match?.status === "upcoming"
-    ? {...match, status:"live"}
-    : match;
-
-  // Use effectiveMatch for all match data (auto-starts upcoming matches)
-  const match = effectiveMatch;
   const course = {
     slope:       match.slope       || COURSES.mammoth.slope,
     rating:      match.rating      || COURSES.mammoth.rating,
     par:         match.par         || COURSES.mammoth.par,
-    strokeIndex: COURSES.mammoth.strokeIndex, // hole-by-hole SI (same layout for now)
+    strokeIndex: COURSES.mammoth.strokeIndex,
     pars:        COURSES.mammoth.pars,
     name:        match.course_name || COURSES.mammoth.name,
   };
