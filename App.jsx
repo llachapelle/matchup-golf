@@ -3153,27 +3153,218 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 }
 
 
-// ─── CREATE MATCH SCREEN ──────────────────────────────────────────────────────
-function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMatch}){
+// ─── COURSE SETUP SCREEN ──────────────────────────────────────────────────────
+function CourseSetupScreen({go, activeTrip, onCourseAdded}){
+  const [step,       setStep]      = useState(1); // 1=course details, 2=tee boxes
+  const [name,       setName]      = useState("");
+  const [city,       setCity]      = useState("");
+  const [state,      setState]     = useState("");
+  const [tees,       setTees]      = useState([
+    {name:"Blue",  color:"blue",  slope:"",rating:"",par:"72",yardage:""},
+    {name:"White", color:"white", slope:"",rating:"",par:"72",yardage:""},
+  ]);
+  const [saving,     setSaving]    = useState(false);
+  const [error,      setError]     = useState("");
+
+  const TEE_COLORS = ["blue","white","gold","red","green","black","platinum"];
+
+  const updateTee = (i, field, val) => {
+    setTees(prev=>{const t=[...prev]; t[i]={...t[i],[field]:val}; return t;});
+  };
+
+  const addTee = () => setTees(prev=>[...prev,{name:"",color:"white",slope:"",rating:"",par:"72",yardage:""}]);
+  const removeTee = i => setTees(prev=>prev.filter((_,idx)=>idx!==i));
+
+  const saveCourse = async () => {
+    if(!name.trim()){ setError("Enter course name"); return; }
+    const validTees = tees.filter(t=>t.name&&t.slope&&t.rating);
+    if(!validTees.length){ setError("Add at least one tee box with slope and rating"); return; }
+    setSaving(true); setError("");
+    try {
+      const [course] = await db.post("courses",{
+        name:       name.trim(),
+        city:       city.trim()||null,
+        state:      state.trim()||null,
+        trip_id:    activeTrip?.id||null,
+      });
+      // Save tee boxes
+      await db.post("tee_boxes", validTees.map(t=>({
+        course_id: course.id,
+        name:      t.name,
+        color:     t.color||"blue",
+        slope:     parseInt(t.slope),
+        rating:    parseFloat(t.rating),
+        par:       parseInt(t.par)||72,
+        yardage:   t.yardage?parseInt(t.yardage):null,
+      })));
+      onCourseAdded && onCourseAdded({...course, tee_boxes: validTees.map(t=>({...t,course_id:course.id}))});
+      go("creatematch");
+    } catch(e){ setError("Failed to save course: "+e.message); }
+    setSaving(false);
+  };
+
+  const inp = (val,fn,ph,type="text",extra={}) => (
+    <input type={type} value={val} onChange={e=>fn(e.target.value)} placeholder={ph}
+      style={{width:"100%",padding:"12px 13px",border:`1.5px solid ${val?C.forest:C.light}`,
+        borderRadius:11,fontSize:14,fontFamily:"Arial,sans-serif",outline:"none",
+        boxSizing:"border-box",background:val?C.mist:C.white,...extra}}/>
+  );
+
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
+      <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"16px 20px 20px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <BackBtn go={go} to="creatematch"/>
+          <span style={{color:"rgba(255,255,255,.6)",fontSize:12,fontFamily:"Arial,sans-serif"}}>{step} of 2</span>
+        </div>
+        <div style={{color:C.white,fontSize:20,fontWeight:700}}>
+          {step===1?"Add Course":"Add Tee Boxes"}
+        </div>
+        <div style={{color:"rgba(255,255,255,.6)",fontSize:13,fontFamily:"Arial,sans-serif"}}>
+          {step===1?"Course details from your scorecard":"Slope, rating & par per tee"}
+        </div>
+        <div style={{marginTop:10,background:"rgba(255,255,255,.2)",borderRadius:8,height:4}}>
+          <div style={{width:step===1?"50%":"100%",background:C.sand,height:"100%",borderRadius:8,transition:"width .3s"}}/>
+        </div>
+      </div>
+
+      <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+        {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif"}}>{error}</div>}
+
+        {step===1&&(<>
+          <div style={card()}>
+            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:12}}>Course Details</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>Course Name *</div>
+                {inp(name,setName,"e.g. Mammoth Dunes")}
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <div style={{flex:2}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>City</div>
+                  {inp(city,setCity,"e.g. Wisconsin Dells")}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>State</div>
+                  {inp(state,setState,"WI")}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style={{...card({background:C.mist})}}>
+            <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",lineHeight:1.6}}>
+              📋 <strong>Where to find this info:</strong><br/>
+              Slope, rating, and par are printed on every scorecard. They're also posted at the starter's window or pro shop. Each set of tees (Blue, White, Red, etc.) has its own values.
+            </div>
+          </div>
+          <button onClick={()=>{if(!name.trim()){setError("Enter course name");return;}setError("");setStep(2);}}
+            style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white)}>
+            Next: Add Tees →
+          </button>
+        </>)}
+
+        {step===2&&(<>
+          {tees.map((tee,i)=>(
+            <div key={i} style={{...card({border:`2px solid ${tee.name?C.forest:C.light}`})}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.charcoal}}>
+                  Tee Box {i+1}
+                  {tee.name&&<span style={{marginLeft:8,fontSize:11,background:C.mist,padding:"2px 8px",borderRadius:8,color:C.forest,fontWeight:600}}>{tee.name}</span>}
+                </div>
+                {tees.length>1&&(
+                  <button onClick={()=>removeTee(i)}
+                    style={{background:"none",border:"none",color:C.red,fontSize:18,cursor:"pointer",padding:"0 4px"}}>×</button>
+                )}
+              </div>
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                {/* Tee name */}
+                <div style={{flex:2}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",textTransform:"uppercase",marginBottom:3}}>Tee Name</div>
+                  <input value={tee.name} onChange={e=>updateTee(i,"name",e.target.value)} placeholder="Blue"
+                    style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${tee.name?C.forest:C.light}`,borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
+                </div>
+                {/* Color dot picker */}
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",textTransform:"uppercase",marginBottom:3}}>Color</div>
+                  <select value={tee.color} onChange={e=>updateTee(i,"color",e.target.value)}
+                    style={{width:"100%",padding:"10px 8px",border:`1.5px solid ${C.light}`,borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif",outline:"none",background:C.white}}>
+                    {TEE_COLORS.map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",textTransform:"uppercase",marginBottom:3}}>Slope *</div>
+                  <input type="number" value={tee.slope} onChange={e=>updateTee(i,"slope",e.target.value)} placeholder="138"
+                    style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${tee.slope?C.forest:C.light}`,borderRadius:10,fontSize:14,fontFamily:"Arial,sans-serif",outline:"none",textAlign:"center",boxSizing:"border-box",fontWeight:700}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",textTransform:"uppercase",marginBottom:3}}>Rating *</div>
+                  <input type="number" step="0.1" value={tee.rating} onChange={e=>updateTee(i,"rating",e.target.value)} placeholder="74.3"
+                    style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${tee.rating?C.forest:C.light}`,borderRadius:10,fontSize:14,fontFamily:"Arial,sans-serif",outline:"none",textAlign:"center",boxSizing:"border-box",fontWeight:700}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",textTransform:"uppercase",marginBottom:3}}>Par *</div>
+                  <input type="number" value={tee.par} onChange={e=>updateTee(i,"par",e.target.value)} placeholder="72"
+                    style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${C.forest}`,borderRadius:10,fontSize:14,fontFamily:"Arial,sans-serif",outline:"none",textAlign:"center",boxSizing:"border-box",fontWeight:700}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",textTransform:"uppercase",marginBottom:3}}>Yards</div>
+                  <input type="number" value={tee.yardage} onChange={e=>updateTee(i,"yardage",e.target.value)} placeholder="7200"
+                    style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${C.light}`,borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif",outline:"none",textAlign:"center",boxSizing:"border-box"}}/>
+                </div>
+              </div>
+              {tee.slope&&tee.rating&&(
+                <div style={{background:C.mist,borderRadius:8,padding:"7px 10px",fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif"}}>
+                  Example: HCP 15 → Course HCP {Math.round(15*(parseInt(tee.slope)||113)/113+(parseFloat(tee.rating)||72)-(parseInt(tee.par)||72))} → Playing HCP ~{Math.round(Math.round(15*(parseInt(tee.slope)||113)/113+(parseFloat(tee.rating)||72)-(parseInt(tee.par)||72))*0.9)}
+                </div>
+              )}
+            </div>
+          ))}
+
+          <button onClick={addTee}
+            style={{background:C.white,border:`2px dashed ${C.mint}`,borderRadius:14,padding:13,
+              fontSize:13,color:C.forest,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+            + Add Another Tee Box
+          </button>
+
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setStep(1)}
+              style={{...bigBtn(C.mist,C.forest),flex:1}}>← Back</button>
+            <button onClick={saveCourse} disabled={saving}
+              style={{...bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white),flex:2}}>
+              {saving?"Saving…":"Save Course →"}
+            </button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+
+function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMatch, tripCourses, onCourseAdded}){
   const isEdit = !!editMatch;
 
   const displayPlayers = tripPlayers.length > 0
     ? tripPlayers
     : RAW.map(p=>({id:p.key, name:p.name, hcp_index:p.index, team:p.team}));
 
-  const [p1Players, setP1Players] = useState(()=>
+  const [p1Players,      setP1Players]     = useState(()=>
     isEdit ? displayPlayers.filter(p=>(editMatch.p1Keys||[]).includes(p.name?.toLowerCase())) : []
   );
-  const [p2Players, setP2Players] = useState(()=>
+  const [p2Players,      setP2Players]     = useState(()=>
     isEdit ? displayPlayers.filter(p=>(editMatch.p2Keys||[]).includes(p.name?.toLowerCase())) : []
   );
-  const [format,    setFormat]    = useState(isEdit ? (editMatch.format||"Best Ball") : "Best Ball");
-  const [hcpMode,   setHcpMode]   = useState("whs");
-  const [hcpPct,    setHcpPct]    = useState(90);
-  const [saving,    setSaving]    = useState(false);
-  const [deleting,  setDeleting]  = useState(false);
-  const [confirmDel,setConfirmDel]= useState(false);
-  const [error,     setError]     = useState("");
+  const [format,         setFormat]        = useState(isEdit ? (editMatch.format||"Best Ball") : "Best Ball");
+  const [hcpMode,        setHcpMode]       = useState("whs");
+  const [hcpPct,         setHcpPct]        = useState(90);
+  const [selectedCourse, setSelectedCourse]= useState(null);
+  const [selectedTee,    setSelectedTee]   = useState(null);
+  const [saving,         setSaving]        = useState(false);
+  const [deleting,       setDeleting]      = useState(false);
+  const [confirmDel,     setConfirmDel]    = useState(false);
+  const [error,          setError]         = useState("");
 
   const togglePlayer = (player, side) => {
     if(side==="p1"){
@@ -3203,6 +3394,11 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
         status:        isEdit ? (editMatch.status||"upcoming") : "upcoming",
         winner_side:   isEdit ? editMatch.winnerSide : null,
         thru:          isEdit ? (editMatch.thru||0) : 0,
+        course_name:   selectedCourse?.name || null,
+        tee_name:      selectedTee?.name || null,
+        slope:         selectedTee?.slope || null,
+        rating:        selectedTee?.rating || null,
+        par:           selectedTee?.par || null,
       };
       if(activeTrip) matchData.trip_id = activeTrip.id;
 
@@ -3303,6 +3499,83 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Course & Tee Selection */}
+        <div style={card()}>
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Course & Tees</div>
+          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>
+            Required for accurate WHS handicap calculations
+          </div>
+
+          {/* Course list */}
+          {(tripCourses||[]).length > 0 ? (
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+              {(tripCourses||[]).map(c=>(
+                <div key={c.id}>
+                  <button onClick={()=>{setSelectedCourse(selectedCourse?.id===c.id?null:c); setSelectedTee(null);}}
+                    style={{width:"100%",background:selectedCourse?.id===c.id?C.mist:C.smoke,
+                      border:`1.5px solid ${selectedCourse?.id===c.id?C.forest:C.light}`,
+                      borderRadius:11,padding:"10px 13px",cursor:"pointer",textAlign:"left",
+                      display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{c.name}</div>
+                      {c.city&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{c.city}{c.state?`, ${c.state}`:""}</div>}
+                    </div>
+                    <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{(c.tee_boxes||[]).length} tees</div>
+                  </button>
+                  {/* Tee box picker — shows when course is selected */}
+                  {selectedCourse?.id===c.id&&(c.tee_boxes||[]).length>0&&(
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",padding:"8px 4px 4px"}}>
+                      {(c.tee_boxes||[]).map(t=>{
+                        const isSel = selectedTee?.id===t.id;
+                        const dotColor = t.color==="blue"?"#3B82F6":t.color==="white"?"#9CA3AF":
+                          t.color==="gold"||t.color==="yellow"?"#F59E0B":t.color==="red"?"#EF4444":
+                          t.color==="black"?"#1F2937":t.color==="green"?"#10B981":"#6B7280";
+                        return(
+                          <button key={t.id} onClick={()=>setSelectedTee(isSel?null:t)}
+                            style={{background:isSel?C.forest:C.white,
+                              color:isSel?C.white:C.charcoal,
+                              border:`2px solid ${isSel?C.forest:C.light}`,
+                              borderRadius:10,padding:"7px 12px",cursor:"pointer",
+                              display:"flex",alignItems:"center",gap:6}}>
+                            <div style={{width:10,height:10,borderRadius:"50%",background:dotColor,border:"1px solid rgba(0,0,0,.1)",flexShrink:0}}/>
+                            <div style={{textAlign:"left"}}>
+                              <div style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif"}}>{t.name}</div>
+                              <div style={{fontSize:10,fontFamily:"Arial,sans-serif",opacity:.8}}>
+                                {t.slope} / {t.rating} / Par {t.par}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{background:C.mist,borderRadius:10,padding:"12px 14px",marginBottom:10,fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+              No courses added yet
+            </div>
+          )}
+
+          {/* Selected summary */}
+          {selectedCourse&&selectedTee&&(
+            <div style={{background:C.greenBg,borderRadius:10,padding:"10px 13px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:700,color:C.green,fontFamily:"Arial,sans-serif"}}>{selectedCourse.name} — {selectedTee.name} Tees</div>
+                <div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>Slope {selectedTee.slope} · Rating {selectedTee.rating} · Par {selectedTee.par}</div>
+              </div>
+              <div style={{fontSize:16}}>✓</div>
+            </div>
+          )}
+
+          <button onClick={()=>go("coursesetup")}
+            style={{width:"100%",background:C.white,border:`2px dashed ${C.mint}`,borderRadius:11,
+              padding:"10px",fontSize:12,color:C.forest,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+            + Add New Course
+          </button>
         </div>
 
         {/* Handicap settings */}
@@ -3654,7 +3927,8 @@ export default function App(){
   const [tripLoading,     setTripLoading]    = useState(false);
   const [tripPlayers,     setTripPlayers]    = useState([]);
   const [appReady,        setAppReady]       = useState(false);
-  const [editMatch,       setEditMatch]      = useState(null); // match being edited
+  const [editMatch,       setEditMatch]      = useState(null);
+  const [tripCourses,     setTripCourses]    = useState([]);
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -3662,7 +3936,7 @@ export default function App(){
   const ts            = useMemo(()=>deriveTeamScores(matches),    [matches]);
   const playerRecords = useMemo(()=>derivePlayerRecords(matches), [matches]);
 
-  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch"];
+  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup"];
   const showNav    = navScreens.includes(screen);
   const goMatch    = (matchId, dest) => { setSelectedMatchId(matchId); setScreen(dest); };
 
@@ -3671,6 +3945,18 @@ export default function App(){
     try {
       const players = await db.get("trip_players", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
       setTripPlayers(players);
+
+      // Load courses and tee boxes for this trip
+      const courses = await db.get("courses", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
+      if(courses.length > 0){
+        const tees = await db.get("tee_boxes",
+          `course_id=in.(${courses.map(c=>c.id).join(",")})&select=*&order=created_at.asc`);
+        const coursesWithTees = courses.map(c=>({
+          ...c,
+          tee_boxes: tees.filter(t=>t.course_id===c.id),
+        }));
+        setTripCourses(coursesWithTees);
+      }
       const dbMatches = await db.get("matches", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
       if(dbMatches.length > 0){
         const appMatches = dbMatches.map(m => ({
@@ -3793,7 +4079,8 @@ export default function App(){
             {screen==="board"       &&<LeaderboardScreen  go={setScreen} {...matchProps}/>}
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
-            {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} onMatchCreated={handleMatchCreated}/>}
+            {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
+            {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);go("creatematch");}}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
