@@ -3503,24 +3503,26 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
         p2_label:      p2Label,
         p1_player_ids: p1Players.map(p=>p.id),
         p2_player_ids: p2Players.map(p=>p.id),
+        format:        format,
         status:        isEdit ? (editMatch.status||"upcoming") : "upcoming",
         winner_side:   isEdit ? editMatch.winnerSide : null,
         thru:          isEdit ? (editMatch.thru||0) : 0,
         course_name:   selectedCourse?.name || null,
         tee_name:      selectedTee?.name || null,
-        slope:         selectedTee?.slope || null,
-        rating:        selectedTee?.rating || null,
-        par:           selectedTee?.par || null,
+        slope:         selectedTee?.slope ? parseInt(selectedTee.slope) : null,
+        rating:        selectedTee?.rating ? parseFloat(selectedTee.rating) : null,
+        par:           selectedTee?.par ? parseInt(selectedTee.par) : null,
       };
       if(activeTrip) matchData.trip_id = activeTrip.id;
 
       if(isEdit && editMatch.id && typeof editMatch.id === "string" && editMatch.id.length > 10){
-        // Update existing Supabase match
+        // Update existing Supabase match — include all editable fields
         await db.patch("matches", `id=eq.${editMatch.id}`, {
           p1_label:      p1Label,
           p2_label:      p2Label,
           p1_player_ids: matchData.p1_player_ids,
           p2_player_ids: matchData.p2_player_ids,
+          format:        format,
           course_name:   matchData.course_name,
           tee_name:      matchData.tee_name,
           slope:         matchData.slope,
@@ -3528,12 +3530,17 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
           par:           matchData.par,
         });
         onMatchCreated && onMatchCreated({
-          ...editMatch, p1:p1Label, p2:p2Label,
-          p1Keys: p1Players.map(p=>p.name.toLowerCase()),
-          p2Keys: p2Players.map(p=>p.name.toLowerCase()),
-          format,
-          course: selectedCourse?.name,
-          tee:    selectedTee?.name,
+          ...editMatch,
+          p1:          p1Label,
+          p2:          p2Label,
+          p1Keys:      p1Players.map(p=>p.name.toLowerCase()),
+          p2Keys:      p2Players.map(p=>p.name.toLowerCase()),
+          format:      format,
+          course_name: matchData.course_name,
+          tee_name:    matchData.tee_name,
+          slope:       matchData.slope,
+          rating:      matchData.rating,
+          par:         matchData.par,
         });
       } else {
         // Create new match
@@ -4084,19 +4091,25 @@ export default function App(){
         `trip_id=eq.${trip.id}&status=neq.deleted&select=*&order=created_at.asc`);
       if(dbMatches.length > 0){
         const appMatches = dbMatches.map(m => ({
-          id:         m.id,
-          round:      1,
-          day:        "Trip Day",
-          p1:         m.p1_label || "Team 1",
-          p2:         m.p2_label || "Team 2",
-          p1Keys:     (m.p1_player_ids||[]).map(pid => { const p=players.find(pl=>pl.id===pid); return p?p.name.toLowerCase():pid; }),
-          p2Keys:     (m.p2_player_ids||[]).map(pid => { const p=players.find(pl=>pl.id===pid); return p?p.name.toLowerCase():pid; }),
-          status:     m.status || "upcoming",
-          winnerSide: m.winner_side || null,
-          score:      m.score || null,
-          thru:       m.thru || 0,
-          liveScore:  m.live_score || null,
-          holeScores: {},
+          id:          m.id,
+          round:       1,
+          day:         "Trip Day",
+          p1:          m.p1_label || "Team 1",
+          p2:          m.p2_label || "Team 2",
+          p1Keys:      (m.p1_player_ids||[]).map(pid => { const p=players.find(pl=>pl.id===pid); return p?p.name.toLowerCase():pid; }),
+          p2Keys:      (m.p2_player_ids||[]).map(pid => { const p=players.find(pl=>pl.id===pid); return p?p.name.toLowerCase():pid; }),
+          status:      m.status      || "upcoming",
+          winnerSide:  m.winner_side || null,
+          score:       m.score       || null,
+          thru:        m.thru        || 0,
+          liveScore:   m.live_score  || null,
+          format:      m.format      || "Best Ball",
+          course_name: m.course_name || null,
+          tee_name:    m.tee_name    || null,
+          slope:       m.slope       || null,
+          rating:      m.rating      || null,
+          par:         m.par         || null,
+          holeScores:  {},
         }));
         setMatches(appMatches);
       }
