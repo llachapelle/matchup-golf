@@ -2894,7 +2894,7 @@ function ProfileScreen({go, matches, playerRecords, onSignOut, session}){
     </div>
   );
 }
-function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch}){
+function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch}){
   const [section,   setSection]  = useState("Players");
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [newName,   setNewName]  = useState("");
@@ -2902,6 +2902,12 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
   const [newTeam,   setNewTeam]  = useState("red");
   const [saving,    setSaving]   = useState(false);
   const [saveMsg,   setSaveMsg]  = useState("");
+
+  // Navigate to create/edit match, optionally passing a match to edit
+  const goCreateMatch = (matchToEdit) => {
+    onGoMatch && onGoMatch(matchToEdit || null);
+    go("creatematch");
+  };
 
   // Use real tripPlayers if available, fall back to RAW demo data
   const displayPlayers = tripPlayers.length > 0
@@ -3059,27 +3065,31 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 
         {/* ── MATCHES TAB ── */}
         {section==="Matches"&&(<>
-          <button onClick={()=>go("creatematch")}
+          <button onClick={()=>goCreateMatch()}
             style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.22)"})}>
             + Create New Match
           </button>
-          {matches.length===0
+          {matches.filter(m=>m.status!=="deleted").length===0
             ? <div style={{textAlign:"center",padding:"40px 20px",color:C.gray,fontFamily:"Arial,sans-serif"}}>
                 No matches yet. Create your first match above.
               </div>
-            : matches.map(m=>{
+            : matches.filter(m=>m.status!=="deleted").map(m=>{
                 const isLive=m.status==="live", isDone=m.status==="completed";
                 return(<div key={m.id} style={{...card({border:isLive?`1.5px solid ${C.mint}`:isDone?`1px solid ${C.light}`:`1px solid ${C.mist}`})}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div>
+                    <div style={{flex:1}}>
                       {isLive&&<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:3}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE</span></div>}
                       <div style={{fontSize:13,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{m.p1}</div>
                       <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>vs {m.p2}</div>
                     </div>
-                    <div style={{textAlign:"right"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
                       {isDone&&<div style={{fontSize:13,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif"}}>{m.score}</div>}
                       {isLive&&<div style={{fontSize:13,fontWeight:700,color:scoreColor(m.liveScore),fontFamily:"Arial,sans-serif"}}>{m.liveScore}</div>}
                       {m.status==="upcoming"&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>⏰ Upcoming</div>}
+                      <button onClick={()=>goCreateMatch(m)}
+                        style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
+                        Edit
+                      </button>
                     </div>
                   </div>
                 </div>);
@@ -3144,28 +3154,36 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 
 
 // ─── CREATE MATCH SCREEN ──────────────────────────────────────────────────────
-function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
-  const [p1Players, setP1Players] = useState([]);
-  const [p2Players, setP2Players] = useState([]);
-  const [format,    setFormat]    = useState("Best Ball");
-  const [hcpMode,   setHcpMode]   = useState("whs");   // whs | custom | off
-  const [hcpPct,    setHcpPct]    = useState(90);       // custom percentage
-  const [saving,    setSaving]    = useState(false);
-  const [error,     setError]     = useState("");
+function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMatch}){
+  const isEdit = !!editMatch;
 
   const displayPlayers = tripPlayers.length > 0
     ? tripPlayers
     : RAW.map(p=>({id:p.key, name:p.name, hcp_index:p.index, team:p.team}));
 
+  const [p1Players, setP1Players] = useState(()=>
+    isEdit ? displayPlayers.filter(p=>(editMatch.p1Keys||[]).includes(p.name?.toLowerCase())) : []
+  );
+  const [p2Players, setP2Players] = useState(()=>
+    isEdit ? displayPlayers.filter(p=>(editMatch.p2Keys||[]).includes(p.name?.toLowerCase())) : []
+  );
+  const [format,    setFormat]    = useState(isEdit ? (editMatch.format||"Best Ball") : "Best Ball");
+  const [hcpMode,   setHcpMode]   = useState("whs");
+  const [hcpPct,    setHcpPct]    = useState(90);
+  const [saving,    setSaving]    = useState(false);
+  const [deleting,  setDeleting]  = useState(false);
+  const [confirmDel,setConfirmDel]= useState(false);
+  const [error,     setError]     = useState("");
+
   const togglePlayer = (player, side) => {
     if(side==="p1"){
       setP1Players(prev=>prev.find(p=>p.id===player.id)
         ? prev.filter(p=>p.id!==player.id)
-        : [...prev.filter(p=>p.id!==player.id), player]);
+        : [...prev, player]);
     } else {
       setP2Players(prev=>prev.find(p=>p.id===player.id)
         ? prev.filter(p=>p.id!==player.id)
-        : [...prev.filter(p=>p.id!==player.id), player]);
+        : [...prev, player]);
     }
   };
 
@@ -3173,7 +3191,7 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
   const p1Label = p1Players.length ? p1Players.map(p=>p.name).join(" / ") : "Select players…";
   const p2Label = p2Players.length ? p2Players.map(p=>p.name).join(" / ") : "Select players…";
 
-  const createMatch = async () => {
+  const saveMatch = async () => {
     if(!p1Players.length || !p2Players.length){ setError("Select at least one player per side"); return; }
     setSaving(true); setError("");
     try {
@@ -3182,26 +3200,50 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
         p2_label:      p2Label,
         p1_player_ids: p1Players.map(p=>p.id),
         p2_player_ids: p2Players.map(p=>p.id),
-        status:        "upcoming",
-        winner_side:   null,
-        thru:          0,
+        status:        isEdit ? (editMatch.status||"upcoming") : "upcoming",
+        winner_side:   isEdit ? editMatch.winnerSide : null,
+        thru:          isEdit ? (editMatch.thru||0) : 0,
       };
-      if(activeTrip){
-        matchData.trip_id = activeTrip.id;
+      if(activeTrip) matchData.trip_id = activeTrip.id;
+
+      if(isEdit && editMatch.dbId){
+        // Update existing match
+        await db.patch("matches", `id=eq.${editMatch.dbId}`, {
+          p1_label: p1Label, p2_label: p2Label,
+          p1_player_ids: matchData.p1_player_ids,
+          p2_player_ids: matchData.p2_player_ids,
+        });
+        onMatchCreated && onMatchCreated({
+          ...editMatch, p1:p1Label, p2:p2Label,
+          p1Keys: p1Players.map(p=>p.name.toLowerCase()),
+          p2Keys: p2Players.map(p=>p.name.toLowerCase()),
+          format,
+        });
+      } else {
+        // Create new match
         const [saved] = await db.post("matches", matchData);
         onMatchCreated && onMatchCreated({
-          ...saved,
-          p1:       p1Label,
-          p2:       p2Label,
-          p1Keys:   p1Players.map(p=>p.name.toLowerCase()),
-          p2Keys:   p2Players.map(p=>p.name.toLowerCase()),
-          round:    1,
-          holeScores: {},
+          ...saved, id: saved?.id||Date.now(),
+          p1:p1Label, p2:p2Label,
+          p1Keys: p1Players.map(p=>p.name.toLowerCase()),
+          p2Keys: p2Players.map(p=>p.name.toLowerCase()),
+          round:1, day:"Trip Day", holeScores:{}, format,
+          status:"upcoming", winnerSide:null, thru:0,
         });
       }
       go("trip");
-    } catch(e){ setError("Failed to create match: " + e.message); }
+    } catch(e){ setError((isEdit?"Failed to update":"Failed to create")+" match: "+e.message); }
     setSaving(false);
+  };
+
+  const deleteMatch = async () => {
+    setDeleting(true);
+    try {
+      if(editMatch?.dbId) await db.patch("matches",`id=eq.${editMatch.dbId}`,{status:"deleted"});
+      onMatchCreated && onMatchCreated({...editMatch, status:"deleted"});
+      go("trip");
+    } catch(e){ setError("Failed to delete: "+e.message); }
+    setDeleting(false);
   };
 
   return(
@@ -3209,15 +3251,38 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"16px 20px 20px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <BackBtn go={go} to="trip"/>
+          {isEdit&&<button onClick={()=>setConfirmDel(true)}
+            style={{background:"rgba(220,38,38,.2)",border:"none",color:"#FCA5A5",borderRadius:8,
+              padding:"5px 12px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
+            Delete
+          </button>}
         </div>
-        <div style={{color:C.white,fontSize:20,fontWeight:700}}>Create Match</div>
+        <div style={{color:C.white,fontSize:20,fontWeight:700}}>{isEdit?"Edit Match":"Create Match"}</div>
         <div style={{color:"rgba(255,255,255,.6)",fontSize:13,fontFamily:"Arial,sans-serif"}}>Pick sides and format</div>
       </div>
 
       <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif"}}>{error}</div>}
 
-        {/* Format picker — all 13 Ryder Cup formats */}
+        {/* Delete confirmation */}
+        {confirmDel&&(
+          <div style={{...card({background:C.redBg,border:`1px solid ${C.red}33`})}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.red,marginBottom:8}}>Delete this match?</div>
+            <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:12}}>This cannot be undone. All scores for this match will be removed.</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={deleteMatch} disabled={deleting}
+                style={{flex:1,background:C.red,color:C.white,border:"none",borderRadius:10,padding:11,fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
+                {deleting?"Deleting…":"Yes, Delete"}
+              </button>
+              <button onClick={()=>setConfirmDel(false)}
+                style={{flex:1,background:C.white,color:C.gray,border:`1px solid ${C.light}`,borderRadius:10,padding:11,fontSize:13,fontFamily:"Arial,sans-serif",cursor:"pointer"}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Format picker */}
         <div style={card()}>
           <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Format</div>
           <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>All formats earn Ryder Cup points. WHS handicaps applied per format rules.</div>
@@ -3244,9 +3309,9 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
         <div style={card()}>
           <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Handicaps</div>
           <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>
-            {hcpMode==="whs"    ? `WHS: ${selectedFormat?.whs||"90%"} of each player's course handicap (auto-calculated)`
+            {hcpMode==="whs"    ? `WHS: ${selectedFormat?.whs||"90%"} of each player's course handicap`
             : hcpMode==="custom"? `Custom: ${hcpPct}% of each player's course handicap`
-            : "Off: gross scores only, no handicap strokes applied"}
+            : "Off: gross scores only, no strokes applied"}
           </div>
           <div style={{display:"flex",gap:6,marginBottom:hcpMode==="custom"?12:0}}>
             {[["whs","WHS (auto)"],["custom","Custom %"],["off","Off (gross)"]].map(([id,label])=>(
@@ -3274,20 +3339,19 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
 
         {/* Side 1 */}
         <div style={card()}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontSize:13,fontWeight:700,color:C.red}}>Side 1 (Red)</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.red}}>Side 1</div>
             <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{p1Players.length} selected</div>
           </div>
           <div style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,marginBottom:10,minHeight:20}}>{p1Label}</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {displayPlayers.map(p=>{
-              const sel = p1Players.find(pl=>pl.id===p.id);
-              const inP2 = p2Players.find(pl=>pl.id===p.id);
+              const sel=p1Players.find(pl=>pl.id===p.id);
+              const inP2=p2Players.find(pl=>pl.id===p.id);
               return(
-                <button key={p.id} onClick={()=>!inP2&&togglePlayer(p,"p1")}
-                  disabled={!!inP2}
+                <button key={p.id} onClick={()=>!inP2&&togglePlayer(p,"p1")} disabled={!!inP2}
                   style={{background:sel?C.red:C.smoke,color:sel?C.white:inP2?C.light:C.charcoal,
-                    border:`1.5px solid ${sel?C.red:inP2?C.light:C.light}`,borderRadius:20,
+                    border:`1.5px solid ${sel?C.red:C.light}`,borderRadius:20,
                     padding:"6px 14px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,
                     cursor:inP2?"not-allowed":"pointer",opacity:inP2?.4:1}}>
                   {p.name}
@@ -3299,20 +3363,19 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
 
         {/* Side 2 */}
         <div style={card()}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontSize:13,fontWeight:700,color:C.blue}}>Side 2 (Blue)</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.blue}}>Side 2</div>
             <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{p2Players.length} selected</div>
           </div>
           <div style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,marginBottom:10,minHeight:20}}>{p2Label}</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {displayPlayers.map(p=>{
-              const sel = p2Players.find(pl=>pl.id===p.id);
-              const inP1 = p1Players.find(pl=>pl.id===p.id);
+              const sel=p2Players.find(pl=>pl.id===p.id);
+              const inP1=p1Players.find(pl=>pl.id===p.id);
               return(
-                <button key={p.id} onClick={()=>!inP1&&togglePlayer(p,"p2")}
-                  disabled={!!inP1}
+                <button key={p.id} onClick={()=>!inP1&&togglePlayer(p,"p2")} disabled={!!inP1}
                   style={{background:sel?C.blue:C.smoke,color:sel?C.white:inP1?C.light:C.charcoal,
-                    border:`1.5px solid ${sel?C.blue:inP1?C.light:C.light}`,borderRadius:20,
+                    border:`1.5px solid ${sel?C.blue:C.light}`,borderRadius:20,
                     padding:"6px 14px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,
                     cursor:inP1?"not-allowed":"pointer",opacity:inP1?.4:1}}>
                   {p.name}
@@ -3332,12 +3395,12 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated}){
           </div>
         )}
 
-        <button onClick={createMatch} disabled={saving||!p1Players.length||!p2Players.length}
+        <button onClick={saveMatch} disabled={saving||!p1Players.length||!p2Players.length}
           style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{
             boxShadow:"0 6px 20px rgba(27,67,50,.25)",
             opacity:(!p1Players.length||!p2Players.length)?.5:1
           })}>
-          {saving?"Creating Match…":"Create Match →"}
+          {saving?(isEdit?"Saving…":"Creating Match…"):(isEdit?"Save Changes →":"Create Match →")}
         </button>
       </div>
     </div>
@@ -3590,7 +3653,8 @@ export default function App(){
   const [activeTrip,      setActiveTrip]     = useState(null);
   const [tripLoading,     setTripLoading]    = useState(false);
   const [tripPlayers,     setTripPlayers]    = useState([]);
-  const [appReady,        setAppReady]       = useState(false); // false until we've checked storage
+  const [appReady,        setAppReady]       = useState(false);
+  const [editMatch,       setEditMatch]      = useState(null); // match being edited
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -3632,20 +3696,20 @@ export default function App(){
   }, []);
 
   // ── On app start: restore session from localStorage ──────────────────────────
-  // Session is valid for ~1 year (Supabase default). We check it's not expired
-  // then restore the user straight to dashboard without re-logging in.
+  // Each user's session is stored under their own key so multiple users
+  // on the same device each have their own independent session.
+  // If no valid session is found, the login screen is always shown.
   useEffect(()=>{
     const restore = async () => {
       try {
         const stored = localStorage.getItem("matchup_session");
         if(stored){
           const s = JSON.parse(stored);
-          // Check token isn't expired (exp is in seconds)
-          const exp = s.expires_at || (s.user?.exp);
+          // Validate token hasn't expired
+          const exp = s.expires_at || s.user?.exp;
           const isExpired = exp && (exp * 1000) < Date.now();
-          if(!isExpired && s.access_token){
+          if(!isExpired && s.access_token && s.user?.id){
             setSession(s);
-            // Try to load their most recent active trip
             try {
               const trips = await db.get("trips",
                 `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
@@ -3653,10 +3717,13 @@ export default function App(){
               setScreen("dashboard");
             } catch(e){ setScreen("dashboard"); }
             setAppReady(true); return;
+          } else {
+            // Expired — clear it so they see login
+            localStorage.removeItem("matchup_session");
           }
         }
       } catch(e){ localStorage.removeItem("matchup_session"); }
-      setAppReady(true); // no stored session — show login
+      setAppReady(true); // No valid session — show login
     };
     restore();
   }, [loadTrip]);
@@ -3725,8 +3792,8 @@ export default function App(){
             {screen==="live"        &&<LiveMatchScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
             {screen==="board"       &&<LeaderboardScreen  go={setScreen} {...matchProps}/>}
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
-            {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} {...matchProps}/>}
-            {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onMatchCreated={handleMatchCreated}/>}
+            {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
+            {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} onMatchCreated={handleMatchCreated}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
