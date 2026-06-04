@@ -3402,18 +3402,26 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
       };
       if(activeTrip) matchData.trip_id = activeTrip.id;
 
-      if(isEdit && editMatch.dbId){
-        // Update existing match
-        await db.patch("matches", `id=eq.${editMatch.dbId}`, {
-          p1_label: p1Label, p2_label: p2Label,
+      if(isEdit && editMatch.id && typeof editMatch.id === "string" && editMatch.id.length > 10){
+        // Update existing Supabase match
+        await db.patch("matches", `id=eq.${editMatch.id}`, {
+          p1_label:      p1Label,
+          p2_label:      p2Label,
           p1_player_ids: matchData.p1_player_ids,
           p2_player_ids: matchData.p2_player_ids,
+          course_name:   matchData.course_name,
+          tee_name:      matchData.tee_name,
+          slope:         matchData.slope,
+          rating:        matchData.rating,
+          par:           matchData.par,
         });
         onMatchCreated && onMatchCreated({
           ...editMatch, p1:p1Label, p2:p2Label,
           p1Keys: p1Players.map(p=>p.name.toLowerCase()),
           p2Keys: p2Players.map(p=>p.name.toLowerCase()),
           format,
+          course: selectedCourse?.name,
+          tee:    selectedTee?.name,
         });
       } else {
         // Create new match
@@ -3435,7 +3443,10 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
   const deleteMatch = async () => {
     setDeleting(true);
     try {
-      if(editMatch?.dbId) await db.patch("matches",`id=eq.${editMatch.dbId}`,{status:"deleted"});
+      if(editMatch?.id && typeof editMatch.id === "string" && editMatch.id.length > 10){
+        // Real Supabase UUID — soft delete via status
+        await db.patch("matches", `id=eq.${editMatch.id}`, {status:"deleted"});
+      }
       onMatchCreated && onMatchCreated({...editMatch, status:"deleted"});
       go("trip");
     } catch(e){ setError("Failed to delete: "+e.message); }
@@ -3957,7 +3968,8 @@ export default function App(){
         }));
         setTripCourses(coursesWithTees);
       }
-      const dbMatches = await db.get("matches", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
+      const dbMatches = await db.get("matches",
+        `trip_id=eq.${trip.id}&status=neq.deleted&select=*&order=created_at.asc`);
       if(dbMatches.length > 0){
         const appMatches = dbMatches.map(m => ({
           id:         m.id,
@@ -4046,7 +4058,19 @@ export default function App(){
   }, [loadTrip]);
 
   const handleMatchCreated = useCallback((newMatch) => {
-    setMatches(prev=>[...prev, {...newMatch, id: newMatch.id || Date.now()}]);
+    setMatches(prev => {
+      // Delete — remove from list
+      if(newMatch.status === "deleted"){
+        return prev.filter(m => m.id !== newMatch.id);
+      }
+      // Edit — replace existing
+      const exists = prev.find(m => m.id === newMatch.id);
+      if(exists){
+        return prev.map(m => m.id === newMatch.id ? {...m, ...newMatch} : m);
+      }
+      // Create — append
+      return [...prev, newMatch];
+    });
   }, []);
 
   const matchProps = { matches, ts, playerRecords, updateMatch, goMatch };
@@ -4080,7 +4104,7 @@ export default function App(){
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
             {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
-            {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);go("creatematch");}}/>}
+            {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);setScreen("creatematch");}}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
