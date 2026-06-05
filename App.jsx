@@ -745,9 +745,16 @@ function MatchesScreen({go, goMatch, matches, ts}){
                 if(m.status==="completed") { setExpandedMatch(isExpanded?null:m.id); }
               };
 
-              // Determine which side is on top (winner/leader) and which is on bottom
-              const p1Team = (m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "red";
-              const p2Team = (m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "blue";
+              // Team colors — check tripPlayers first, then RAW demo data
+              const getTeam = keys => {
+                for(const k of (keys||[])){
+                  const rp = RAW.find(p=>p.key===k);
+                  if(rp) return rp.team;
+                }
+                return null;
+              };
+              const p1Team = getTeam(m.p1Keys) || "red";
+              const p2Team = getTeam(m.p2Keys) || "blue";
 
               // For completed: winner on top. For live: leading team on top. For upcoming: p1 on top.
               let topSide="p1"; // default
@@ -796,6 +803,12 @@ function MatchesScreen({go, goMatch, matches, ts}){
                           </div>
                           <div style={{fontSize:12,color:botCol,fontFamily:"Arial,sans-serif",marginTop:2,fontWeight:bottomFW}}>
                             vs {bottomLabel}
+                          </div>
+                          {/* Format / course info */}
+                          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
+                            {m.format&&m.format!=="Best Ball"&&<span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>}
+                            {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
+                            {m.hcp_mode&&m.hcp_mode!=="whs"&&<span style={{...pill(C.amberBg,C.amber),fontSize:10}}>{m.hcp_mode==="off"?"No HCP":`HCP ${m.hcp_pct}%`}</span>}
                           </div>
                         </>);
                       })()}
@@ -1638,10 +1651,20 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
 
   const curScores   = holeScores[holeNum]||{};
   const setScore    = (key,val)=>setHoleScores(prev=>({...prev,[holeNum]:{...(prev[holeNum]||{}),[key]:val}}));
-  // allEntered: true when all RAW players have scores (guests are optional extras)
-  const rawAllPlayers = [...p1RawPlayers, ...p2RawPlayers];
-  const allEntered  = rawAllPlayers.length > 0 &&
-    rawAllPlayers.every(p=>{const v=parseInt(curScores[p.key]);return !isNaN(v)&&v>0;});
+
+  // Detect team-score formats (one score per side, not per player)
+  const isTeamScoreFormat = format.toLowerCase().includes("scramble")
+    || format.toLowerCase().includes("alt")
+    || format.toLowerCase().includes("alternate");
+
+  // allEntered: true when all required scores are present
+  const allEntered = isTeamScoreFormat
+    ? (parseInt(curScores["team_p1"])>0 && parseInt(curScores["team_p2"])>0)
+    : (() => {
+        const rawAllPlayers = [...p1RawPlayers, ...p2RawPlayers];
+        return rawAllPlayers.length > 0 &&
+          rawAllPlayers.every(p=>{ const v=parseInt(curScores[p.key]); return !isNaN(v)&&v>0; });
+      })();
 
   // Get net score for any player key (RAW uses WHS, guest uses GUEST_PLAYERS handicap, unknown uses gross)
   const getNetLive = (key, scores, holeNum) => {
@@ -1673,6 +1696,14 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
   };
 
   const computeHoleWinner = (scores) => {
+    // Team-score formats: compare team_p1 vs team_p2 directly
+    if(isTeamScoreFormat){
+      const s1 = parseInt(scores["team_p1"]);
+      const s2 = parseInt(scores["team_p2"]);
+      if(isNaN(s1)||isNaN(s2)) return "tie";
+      return s1<s2?"p1":s2<s1?"p2":"tie";
+    }
+    // Per-player formats: best net score per side
     const best = side => {
       const sideAllKeys = side==="p1"
         ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(p=>p.key)]
@@ -1710,7 +1741,7 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
 
   const status        = computeStatusFromResults(holeResults);
   const confirmedThru = Object.keys(holeResults).length;
-  const preview       = allEntered ? computeHoleWinner(curScores) : null;
+  const preview = allEntered ? computeHoleWinner(curScores) : null;
 
   const advanceHole = () => {
     if(holeNum<18) setHoleNum(holeNum+1);
@@ -1944,6 +1975,30 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
           </div>
         ):(
           <>
+            {/* Scramble / Alt Shot: one team score per side */}
+            {(format.toLowerCase().includes("scramble")||format.toLowerCase().includes("alt")||format.toLowerCase().includes("alternate"))?(
+              <div style={{display:"flex",gap:10}}>
+                {[{side:"p1",label:match.p1,team:p1Team,key:"team_p1"},{side:"p2",label:match.p2,team:p2Team,key:"team_p2"}].map(s=>{
+                  const grossVal = curScores[s.key]??"";
+                  const gross = parseInt(grossVal);
+                  const teamCol = s.team==="red"?C.red:C.blue;
+                  const teamBgCol = s.team==="red"?C.redBg:C.blueBg;
+                  return(
+                    <div key={s.key} style={{flex:1,background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${teamBgCol}`}}>
+                      <div style={{background:teamCol,padding:"8px 12px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{s.label}</div>
+                      <div style={{padding:"16px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+                        <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Team Score</div>
+                        <input type="number" min="1" max="15" value={grossVal}
+                          onChange={e=>setScore(s.key,e.target.value)} placeholder="—"
+                          style={{width:64,height:56,border:`2px solid ${grossVal?teamCol:C.light}`,borderRadius:14,textAlign:"center",fontSize:26,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
+                        {!isNaN(gross)&&gross>0&&<div style={{fontSize:11,color:teamCol,fontFamily:"Arial,sans-serif"}}>{gross<par?"🐦 Birdie":gross===par?"Par":gross===par+1?"Bogey":`+${gross-par}`}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ):(
+              <>
             {/* P1 side */}
             <div style={{background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${p1Team==="red"?C.redBg:C.blueBg}`}}>
               <div style={{background:p1Team==="red"?C.red:C.blue,padding:"8px 16px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>{match.p1}</div>
@@ -2056,6 +2111,8 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
               return(<div style={{background:bg,borderRadius:14,padding:"12px 16px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:700,color,fontFamily:"Arial,sans-serif"}}>{text}</div><div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3}}>Best net · tap Submit to confirm</div></div>);
             })()}
             {allEntered&&<button onClick={submitHole} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.25)"})}>Submit Hole {holeNum} →</button>}
+            </> {/* closes per-player section */}
+            )} {/* closes scramble ternary */}
           </>
         )}
 
