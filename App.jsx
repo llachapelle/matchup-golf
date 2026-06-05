@@ -1657,14 +1657,19 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
     || format.toLowerCase().includes("alt")
     || format.toLowerCase().includes("alternate");
 
-  // allEntered: true when all required scores are present
+  // allEntered: true when at least one score per side is present
+  // We don't require ALL players — scorer may not have every score yet
+  // For team formats: both team scores required
+  // For per-player: at least one score on each side
+  const p1AllKeys = [...(match.p1Keys||[]), ...p1ExtPlayers.map(p=>p.key)];
+  const p2AllKeys = [...(match.p2Keys||[]), ...p2ExtPlayers.map(p=>p.key)];
+
   const allEntered = isTeamScoreFormat
     ? (parseInt(curScores["team_p1"])>0 && parseInt(curScores["team_p2"])>0)
-    : (() => {
-        const rawAllPlayers = [...p1RawPlayers, ...p2RawPlayers];
-        return rawAllPlayers.length > 0 &&
-          rawAllPlayers.every(p=>{ const v=parseInt(curScores[p.key]); return !isNaN(v)&&v>0; });
-      })();
+    : (
+        p1AllKeys.some(k=>parseInt(curScores[k])>0) &&
+        p2AllKeys.some(k=>parseInt(curScores[k])>0)
+      );
 
   // Get net score for any player key (RAW uses WHS, guest uses GUEST_PLAYERS handicap, unknown uses gross)
   const getNetLive = (key, scores, holeNum) => {
@@ -2110,7 +2115,14 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
               const bg=preview==="p1"?(p1Team==="red"?C.redBg:C.blueBg):preview==="p2"?(p2Team==="red"?C.redBg:C.blueBg):C.mist;
               return(<div style={{background:bg,borderRadius:14,padding:"12px 16px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:700,color,fontFamily:"Arial,sans-serif"}}>{text}</div><div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3}}>Best net · tap Submit to confirm</div></div>);
             })()}
-            {allEntered&&<button onClick={submitHole} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.25)"})}>Submit Hole {holeNum} →</button>}
+            <button onClick={()=>allEntered&&submitHole()}
+              disabled={!allEntered}
+              style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{
+                boxShadow:"0 6px 20px rgba(27,67,50,.25)",
+                opacity: allEntered?1:0.4,
+              })}>
+              {allEntered ? `Submit Hole ${holeNum} →` : "Enter scores to continue"}
+            </button>
             </>
             )}
           </>
