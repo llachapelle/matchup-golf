@@ -2111,8 +2111,8 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
               return(<div style={{background:bg,borderRadius:14,padding:"12px 16px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:700,color,fontFamily:"Arial,sans-serif"}}>{text}</div><div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3}}>Best net · tap Submit to confirm</div></div>);
             })()}
             {allEntered&&<button onClick={submitHole} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.25)"})}>Submit Hole {holeNum} →</button>}
-            </> {/* closes per-player section */}
-            )} {/* closes scramble ternary */}
+            </>
+            )}
           </>
         )}
 
