@@ -1652,19 +1652,19 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
   const curScores   = holeScores[holeNum]||{};
   const setScore    = (key,val)=>setHoleScores(prev=>({...prev,[holeNum]:{...(prev[holeNum]||{}),[key]:val}}));
 
-  // Detect team-score formats (one score per side, not per player)
-  const isTeamScoreFormat = format.toLowerCase().includes("scramble")
-    || format.toLowerCase().includes("alt")
-    || format.toLowerCase().includes("alternate");
+  // Format classification
+  const isScramble   = format.toLowerCase().includes("scramble");
+  const isAltShot    = format.toLowerCase().includes("alt")&&!isScramble;
+  const isTeamScoreFormat = isScramble || isAltShot; // both use one score per team
 
-  // allEntered: true when at least one score per side is present
-  // We don't require ALL players — scorer may not have every score yet
-  // For team formats: both team scores required
-  // For per-player: at least one score on each side
+  // allEntered: scramble only needs one side's score; alt-shot/match play needs both
   const p1AllKeys = [...(match.p1Keys||[]), ...p1ExtPlayers.map(p=>p.key)];
   const p2AllKeys = [...(match.p2Keys||[]), ...p2ExtPlayers.map(p=>p.key)];
 
-  const allEntered = isTeamScoreFormat
+  const allEntered = isScramble
+    // Scramble: just need the current player's team score to advance
+    ? (parseInt(curScores["team_p1"])>0 || parseInt(curScores["team_p2"])>0)
+    : isAltShot
     ? (parseInt(curScores["team_p1"])>0 && parseInt(curScores["team_p2"])>0)
     : (
         p1AllKeys.some(k=>parseInt(curScores[k])>0) &&
@@ -1701,14 +1701,22 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
   };
 
   const computeHoleWinner = (scores) => {
-    // Team-score formats: compare team_p1 vs team_p2 directly
-    if(isTeamScoreFormat){
-      const s1 = parseInt(scores["team_p1"]);
-      const s2 = parseInt(scores["team_p2"]);
+    if(isScramble){
+      // Scramble: no hole winner — just record that scores exist
+      // Return "p1" or "p2" only if that team entered a score (for tracking thru)
+      // Winner determined after 18 by total strokes
+      const s1=parseInt(scores["team_p1"]), s2=parseInt(scores["team_p2"]);
+      if(!isNaN(s1)&&s1>0&&!isNaN(s2)&&s2>0) return "both"; // both teams scored
+      if(!isNaN(s1)&&s1>0) return "p1_only"; // only p1 scored this hole yet
+      if(!isNaN(s2)&&s2>0) return "p2_only"; // only p2 scored this hole yet
+      return "none";
+    }
+    if(isAltShot){
+      const s1=parseInt(scores["team_p1"]), s2=parseInt(scores["team_p2"]);
       if(isNaN(s1)||isNaN(s2)) return "tie";
       return s1<s2?"p1":s2<s1?"p2":"tie";
     }
-    // Per-player formats: best net score per side
+    // Per-player match play: best net score per side
     const best = side => {
       const sideAllKeys = side==="p1"
         ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(p=>p.key)]
@@ -1719,8 +1727,31 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
     return n1<n2?"p1":n2<n1?"p2":"tie";
   };
 
-  // Pure function: compute match status from any given holeResults map
+  // Pure function: compute match status from hole results and scores
   const computeStatusFromResults = (results) => {
+    const p1Col=p1Team==="red"?C.sand:"#85C1E9";
+    const p2Col=p2Team==="red"?C.sand:"#85C1E9";
+
+    // Scramble: stroke play — show running totals
+    if(isScramble){
+      let t1=0,t2=0,h1=0,h2=0;
+      for(let h=1;h<=18;h++){
+        const hs=holeScores[h]||{};
+        const s1=parseInt(hs["team_p1"]), s2=parseInt(hs["team_p2"]);
+        if(!isNaN(s1)&&s1>0){t1+=s1;h1++;}
+        if(!isNaN(s2)&&s2>0){t2+=s2;h2++;}
+      }
+      if(h1===0&&h2===0) return {text:"Not started", color:"rgba(255,255,255,.8)"};
+      const thruStr = h1>0&&h2>0&&h1===h2?`thru ${h1}`:h1>0||h2>0?`(${match.p1.split(" / ")[0]}: thru ${h1}, ${match.p2.split(" / ")[0]}: thru ${h2})`:"";
+      if(h1===18&&h2===18){
+        if(t1<t2) return {text:`${match.p1} wins (${t1} vs ${t2})`, color:p1Col};
+        if(t2<t1) return {text:`${match.p2} wins (${t2} vs ${t1})`, color:p2Col};
+        return {text:`Tied (${t1} each)`, color:"rgba(255,255,255,.8)"};
+      }
+      return {text:`${match.p1}: ${t1||"—"} · ${match.p2}: ${t2||"—"} ${thruStr}`, color:"rgba(255,255,255,.85)"};
+    }
+
+    // Match play (best ball, alt shot, singles, etc.)
     let p1=0,p2=0,ties=0;
     for(let h=1;h<=18;h++){
       if(results[h]==="p1")p1++;
@@ -1730,8 +1761,6 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
     const played=p1+p2+ties, diff=p1-p2, rem=18-played;
     if(played===0) return {text:match.liveScore||"Not started", color:"rgba(255,255,255,.8)"};
     const p1Label=match.p1, p2Label=match.p2;
-    const p1Col=p1Team==="red"?C.sand:"#85C1E9";
-    const p2Col=p2Team==="red"?C.sand:"#85C1E9";
     if(diff>rem)  return {text:`${p1Label} wins ${diff}&${rem}`, color:p1Col};
     if(-diff>rem) return {text:`${p2Label} wins ${-diff}&${rem}`, color:p2Col};
     if(played===18){
@@ -1754,14 +1783,23 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
   };
 
   const submitHole = async () => {
-    const winner = computeHoleWinner(curScores);
-    const newResults   = {...holeResults, [holeNum]: winner};
-    const newHoleScores= {...holeScores,  [holeNum]: {...curScores}};
-    setHoleResults(newResults);
+    const winner     = computeHoleWinner(curScores);
+    const newHoleScores = {...holeScores, [holeNum]: {...(holeScores[holeNum]||{}), ...curScores}};
     setHoleScores(newHoleScores);
-    const newStatus = computeStatusFromResults(newResults);
 
-    // Save to local state
+    // For scramble: don't add to holeResults (no hole winners), just track scores
+    // Advance hole when at least one team has submitted
+    let newResults = holeResults;
+    if(!isScramble){
+      newResults = {...holeResults, [holeNum]: winner};
+      setHoleResults(newResults);
+    } else {
+      // For scramble, mark hole as having data
+      newResults = {...holeResults, [holeNum]: winner}; // "both"/"p1_only"/"p2_only"
+      setHoleResults(newResults);
+    }
+
+    const newStatus = computeStatusFromResults(newResults);
     updateMatch(match.id, {
       thru:       holeNum,
       liveScore:  newStatus.text,
@@ -1769,39 +1807,30 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
       status:     "live",
     });
 
-    // Save hole scores to Supabase (one row per player per hole)
-    if(activeTrip && match.id && typeof match.id === "string" && match.id.length > 10){
+    // Save to Supabase
+    if(activeTrip && match.id && typeof match.id==="string" && match.id.length>10){
       try {
         const holeRows = Object.entries(curScores)
           .filter(([,v])=>v&&parseInt(v)>0)
-          .map(([key, gross])=>{
-            const tp = tripPlayers?.find(p=>p.name.toLowerCase()===key);
-            return {
-              match_id:    match.id,
-              player_id:   tp?.id || key,
-              hole_number: holeNum,
-              gross_score: parseInt(gross),
-            };
+          .map(([key,gross])=>{
+            const tp=tripPlayers?.find(p=>p.name.toLowerCase()===key);
+            return {match_id:match.id, player_id:tp?.id||key, hole_number:holeNum, gross_score:parseInt(gross)};
           });
-        if(holeRows.length > 0){
-          // Upsert — update if already exists
-          await fetch(`${SUPA_URL}/rest/v1/hole_scores`, {
-            method: "POST",
-            headers: {...db.headers, "Prefer":"resolution=merge-duplicates"},
-            body: JSON.stringify(holeRows),
+        if(holeRows.length>0){
+          await fetch(`${SUPA_URL}/rest/v1/hole_scores`,{
+            method:"POST",
+            headers:{...db.headers,"Prefer":"resolution=merge-duplicates"},
+            body:JSON.stringify(holeRows),
           });
         }
-        // Update match status in DB
-        await db.patch("matches", `id=eq.${match.id}`, {
-          thru:       holeNum,
-          live_score: newStatus.text,
-          status:     "live",
+        await db.patch("matches",`id=eq.${match.id}`,{
+          thru:holeNum, live_score:newStatus.text, status:"live",
         });
-      } catch(e){ console.warn("Failed to save hole to DB:", e.message); }
+      } catch(e){console.warn("Failed to save hole:",e.message);}
     }
 
     setShowUndo(true);
-    setTimeout(()=>setShowUndo(false), 5000);
+    setTimeout(()=>setShowUndo(false),5000);
     advanceHole();
   };
 
@@ -1901,13 +1930,26 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
             </div>
           </div>
           <button onClick={async ()=>{
-            const p1w=Object.values(holeResults).filter(v=>v==="p1").length;
-            const p2w=Object.values(holeResults).filter(v=>v==="p2").length;
-            const ties=Object.values(holeResults).filter(v=>v==="tie").length;
-            const ws=p1w>p2w?"p1":p2w>p1w?"p2":"halve";
-            const diff=Math.abs(p1w-p2w);
-            const rem=18-(p1w+p2w+ties);
-            const scoreStr=ws==="halve"?"All Square":diff>rem?`${diff}&${rem}`:"1UP";
+            let ws, scoreStr;
+            if(isScramble){
+              // Scramble: count total strokes per team
+              let t1=0,t2=0;
+              for(let h=1;h<=18;h++){
+                const hs=holeScores[h]||{};
+                const s1=parseInt(hs["team_p1"]),s2=parseInt(hs["team_p2"]);
+                if(!isNaN(s1)&&s1>0)t1+=s1;
+                if(!isNaN(s2)&&s2>0)t2+=s2;
+              }
+              ws=t1<t2?"p1":t2<t1?"p2":"halve";
+              scoreStr=ws==="halve"?`Tied (${t1})`:`${ws==="p1"?match.p1:match.p2} wins (${Math.min(t1,t2)} vs ${Math.max(t1,t2)})`;
+            } else {
+              const p1w=Object.values(holeResults).filter(v=>v==="p1").length;
+              const p2w=Object.values(holeResults).filter(v=>v==="p2").length;
+              const ties=Object.values(holeResults).filter(v=>v==="tie").length;
+              ws=p1w>p2w?"p1":p2w>p1w?"p2":"halve";
+              const diff=Math.abs(p1w-p2w),rem=18-(p1w+p2w+ties);
+              scoreStr=ws==="halve"?"All Square":diff>rem?`${diff}&${rem}`:"1UP";
+            }
             await finishMatch({winnerSide:ws, text:scoreStr});
             go("board");
           }} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.25)"})}>
@@ -1985,22 +2027,34 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
         ):(
           <>
             {isTeamScoreFormat?(
-              <div style={{display:"flex",gap:10}}>
-                {[{label:match.p1,team:p1Team,key:"team_p1"},{label:match.p2,team:p2Team,key:"team_p2"}].map(s=>{
-                  const grossVal=curScores[s.key]??"",gross=parseInt(grossVal);
-                  const tc=s.team==="red"?C.red:C.blue,tbg=s.team==="red"?C.redBg:C.blueBg;
-                  return(
-                    <div key={s.key} style={{flex:1,background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${tbg}`}}>
-                      <div style={{background:tc,padding:"8px 12px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{s.label}</div>
-                      <div style={{padding:"16px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
-                        <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Team Score</div>
-                        <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(s.key,e.target.value)} placeholder="—"
-                          style={{width:64,height:56,border:`2px solid ${grossVal?tc:C.light}`,borderRadius:14,textAlign:"center",fontSize:26,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
-                        {!isNaN(gross)&&gross>0&&<div style={{fontSize:11,color:tc,fontFamily:"Arial,sans-serif"}}>{gross<par?"🐦 Birdie":gross===par?"Par":gross===par+1?"Bogey":`+${gross-par}`}</div>}
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {isScramble&&<div style={{background:C.mist,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+                  📋 Enter your team's score and tap Submit. Other team enters theirs separately.
+                </div>}
+                <div style={{display:"flex",gap:10}}>
+                  {[{label:match.p1,team:p1Team,key:"team_p1"},{label:match.p2,team:p2Team,key:"team_p2"}].map(s=>{
+                    const grossVal=curScores[s.key]??"",gross=parseInt(grossVal);
+                    const tc=s.team==="red"?C.red:C.blue,tbg=s.team==="red"?C.redBg:C.blueBg;
+                    const hasScore=!isNaN(gross)&&gross>0;
+                    const prevTotal=isScramble?Array.from({length:holeNum-1},(_,i)=>i+1)
+                      .reduce((sum,h)=>{const v=parseInt((holeScores[h]||{})[s.key]);return sum+(isNaN(v)?0:v);},0):0;
+                    return(
+                      <div key={s.key} style={{flex:1,background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`2px solid ${hasScore?tc:tbg}`}}>
+                        <div style={{background:tc,padding:"8px 12px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:.8,textTransform:"uppercase",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span>{s.label}</span>
+                          {isScramble&&prevTotal>0&&<span style={{fontSize:10,opacity:.85}}>+{prevTotal}</span>}
+                        </div>
+                        <div style={{padding:"16px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+                          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Hole {holeNum}</div>
+                          <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(s.key,e.target.value)} placeholder="—"
+                            style={{width:64,height:56,border:`2px solid ${grossVal?tc:C.light}`,borderRadius:14,textAlign:"center",fontSize:26,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
+                          {hasScore&&<div style={{fontSize:11,color:tc,fontFamily:"Arial,sans-serif"}}>{gross<par?"🐦 Birdie":gross===par?"Par":gross===par+1?"Bogey":`+${gross-par}`}</div>}
+                          {isScramble&&hasScore&&prevTotal>0&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Total: {prevTotal+gross}</div>}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             ):(
               <>
@@ -2069,12 +2123,13 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
               return(<div style={{background:bg2,borderRadius:14,padding:"12px 16px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:700,color:col,fontFamily:"Arial,sans-serif"}}>{txt}</div><div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3}}>Tap Submit to confirm</div></div>);
             })()}
 
-            {/* Submit button — always visible, greyed when not ready */}
             <button onClick={submitHole} disabled={!allEntered}
               style={{...bigBtn(`linear-gradient(135deg,${allEntered?C.forest:"#9CA3AF"},${allEntered?C.fairway:"#D1D5DB"})`,C.white),
                 boxShadow:allEntered?"0 6px 20px rgba(27,67,50,.25)":"none",
                 cursor:allEntered?"pointer":"not-allowed"}}>
-              {allEntered?`Submit Hole ${holeNum} →`:"Enter at least one score per side"}
+              {allEntered
+                ? (isScramble ? `Submit My Team's Score →` : `Submit Hole ${holeNum} →`)
+                : (isScramble ? "Enter your team's score" : "Enter at least one score per side")}
             </button>
           </>
         )}
