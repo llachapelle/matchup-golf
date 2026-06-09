@@ -1521,7 +1521,7 @@ function MatchEditScreen({go, matchId, matches, updateMatch}){
 
 
 // ─── LIVE MATCH ───────────────────────────────────────────────────────────────
-function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, activeTrip}){
+function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayers, activeTrip}){
   // effectiveMatch: auto-starts upcoming matches as live when scorer taps in
   const rawMatch = matches.find(m=>m.id===matchId)
                || matches.find(m=>m.status==="live")
@@ -1933,6 +1933,10 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
               style={{background:quickMode?C.sand:"rgba(255,255,255,.15)",border:"none",color:quickMode?C.charcoal:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:700}}>
               {quickMode?"⚡ Quick":"Quick Mode"}
             </button>
+            <button onClick={()=>{ goMatch(match.id,"creatematch"); }}
+              style={{background:"rgba(255,255,255,.15)",border:"none",color:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:700}}>
+              Edit
+            </button>
           </div>
         </div>
           <div style={{color:"rgba(255,255,255,.65)",fontSize:11,fontFamily:"Arial,sans-serif",marginBottom:3}}>
@@ -1980,23 +1984,19 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
           </div>
         ):(
           <>
-            {/* Scramble / Alt Shot: one team score per side */}
-            {(format.toLowerCase().includes("scramble")||format.toLowerCase().includes("alt")||format.toLowerCase().includes("alternate"))?(
+            {isTeamScoreFormat?(
               <div style={{display:"flex",gap:10}}>
-                {[{side:"p1",label:match.p1,team:p1Team,key:"team_p1"},{side:"p2",label:match.p2,team:p2Team,key:"team_p2"}].map(s=>{
-                  const grossVal = curScores[s.key]??"";
-                  const gross = parseInt(grossVal);
-                  const teamCol = s.team==="red"?C.red:C.blue;
-                  const teamBgCol = s.team==="red"?C.redBg:C.blueBg;
+                {[{label:match.p1,team:p1Team,key:"team_p1"},{label:match.p2,team:p2Team,key:"team_p2"}].map(s=>{
+                  const grossVal=curScores[s.key]??"",gross=parseInt(grossVal);
+                  const tc=s.team==="red"?C.red:C.blue,tbg=s.team==="red"?C.redBg:C.blueBg;
                   return(
-                    <div key={s.key} style={{flex:1,background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${teamBgCol}`}}>
-                      <div style={{background:teamCol,padding:"8px 12px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{s.label}</div>
+                    <div key={s.key} style={{flex:1,background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${tbg}`}}>
+                      <div style={{background:tc,padding:"8px 12px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{s.label}</div>
                       <div style={{padding:"16px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
                         <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Team Score</div>
-                        <input type="number" min="1" max="15" value={grossVal}
-                          onChange={e=>setScore(s.key,e.target.value)} placeholder="—"
-                          style={{width:64,height:56,border:`2px solid ${grossVal?teamCol:C.light}`,borderRadius:14,textAlign:"center",fontSize:26,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
-                        {!isNaN(gross)&&gross>0&&<div style={{fontSize:11,color:teamCol,fontFamily:"Arial,sans-serif"}}>{gross<par?"🐦 Birdie":gross===par?"Par":gross===par+1?"Bogey":`+${gross-par}`}</div>}
+                        <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(s.key,e.target.value)} placeholder="—"
+                          style={{width:64,height:56,border:`2px solid ${grossVal?tc:C.light}`,borderRadius:14,textAlign:"center",fontSize:26,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
+                        {!isNaN(gross)&&gross>0&&<div style={{fontSize:11,color:tc,fontFamily:"Arial,sans-serif"}}>{gross<par?"🐦 Birdie":gross===par?"Par":gross===par+1?"Bogey":`+${gross-par}`}</div>}
                       </div>
                     </div>
                   );
@@ -2004,127 +2004,78 @@ function LiveMatchScreen({go, matchId, matches, updateMatch, tripPlayers, active
               </div>
             ):(
               <>
-            {/* P1 side */}
-            <div style={{background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${p1Team==="red"?C.redBg:C.blueBg}`}}>
-              <div style={{background:p1Team==="red"?C.red:C.blue,padding:"8px 16px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>{match.p1}</div>
-              {p1Players.map(p=>{
-                const isExt  = p.isExternal;
-                const grossVal = curScores[p.key]??"";
-                const gross  = parseInt(grossVal);
-                const strks  = !isExt && !isNaN(gross) && gross>0 ? sOnHole(p.ms, si) : 0;
-                // Compute net for ALL players (RAW uses WHS strokes, guests use getNetLive)
-                const netVal = !isNaN(gross) && gross>0
-                  ? (isExt ? getNetLive(p.key, curScores, holeNum) : gross - sOnHole(p.ms, si))
-                  : null;
-                const displayVal = showNet && netVal!==null ? netVal : (gross>0?gross:null);
-                return(
-                  <div key={p.key}>
-                    <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div onClick={()=>!isExt&&setExpandHcp(expandHcp===p.key?null:p.key)} style={{cursor:isExt?"default":"pointer"}}>
-                        <div style={{fontSize:14,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
-                          {p.name}
-                          {!isExt&&strks>0&&<span style={{fontSize:10,background:C.sand,padding:"1px 5px",borderRadius:6,color:C.charcoal,marginLeft:4}}>+{strks}</span>}
-                          {isExt&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}> (guest)</span>}
-                        </div>
-                        <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>
-                          {isExt ? `HCP ${p.index}` : `HCP ${p.index} · tap for details`}
-                        </div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        {netVal!==null&&(
-                          <div style={{textAlign:"right"}}>
-                            <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{showNet?"Net":"Gross→Net"}</div>
-                            <div style={{fontSize:18,fontWeight:700,color:C.forest}}>{showNet?netVal:gross}</div>
-                            {!showNet&&<div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>net {netVal}</div>}
+                <div style={{background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${p1Team==="red"?C.redBg:C.blueBg}`}}>
+                  <div style={{background:p1Team==="red"?C.red:C.blue,padding:"8px 16px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>{match.p1}</div>
+                  {p1Players.map(p=>{
+                    const isExt=p.isExternal,grossVal=curScores[p.key]??"",gross=parseInt(grossVal);
+                    const strks=!isExt&&!isNaN(gross)&&gross>0?sOnHole(p.ms,si):0;
+                    const netVal=!isNaN(gross)&&gross>0?(isExt?getNetLive(p.key,curScores,holeNum):gross-sOnHole(p.ms,si)):null;
+                    return(
+                      <div key={p.key}>
+                        <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div onClick={()=>!isExt&&setExpandHcp(expandHcp===p.key?null:p.key)} style={{cursor:isExt?"default":"pointer"}}>
+                            <div style={{fontSize:14,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
+                              {p.name}{!isExt&&strks>0&&<span style={{fontSize:10,background:C.sand,padding:"1px 5px",borderRadius:6,color:C.charcoal,marginLeft:4}}>+{strks}</span>}
+                              {isExt&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}> (guest)</span>}
+                            </div>
+                            <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{isExt?`HCP ${p.index||"?"}`:`HCP ${p.index} · tap for details`}</div>
                           </div>
-                        )}
-                        <input type="number" min="1" max="15" value={grossVal}
-                          onChange={e=>setScore(p.key,e.target.value)} placeholder="—"
-                          style={{width:52,height:44,border:`2px solid ${grossVal?C.forest:C.light}`,borderRadius:12,textAlign:"center",fontSize:20,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
-                      </div>
-                    </div>
-                    {!isExt&&expandHcp===p.key&&(
-                      <div style={{background:C.mist,padding:"10px 16px",fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,borderTop:`1px solid ${C.light}`}}>
-                        <div>HCP Index: <strong>{p.index}</strong></div>
-                        <div>Course HCP: <strong>{p.ch}</strong></div>
-                        <div>Playing HCP: <strong>{p.ph}</strong></div>
-                        <div>Match strokes: <strong>{p.ms>0?`+${p.ms}`:0}</strong></div>
-                        <div>Strokes this hole (SI {si}): <strong>{strks>0?`+${strks}`:"None"}</strong></div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* P2 side */}
-            <div style={{background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${p2Team==="red"?C.redBg:C.blueBg}`}}>
-              <div style={{background:p2Team==="red"?C.red:C.blue,padding:"8px 16px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>{match.p2}</div>
-              {p2Players.map(p=>{
-                const isExt  = p.isExternal;
-                const grossVal = curScores[p.key]??"";
-                const gross  = parseInt(grossVal);
-                const strks  = !isExt && !isNaN(gross) && gross>0 ? sOnHole(p.ms, si) : 0;
-                const netVal = !isNaN(gross) && gross>0
-                  ? (isExt ? getNetLive(p.key, curScores, holeNum) : gross - sOnHole(p.ms, si))
-                  : null;
-                return(
-                  <div key={p.key}>
-                    <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div onClick={()=>!isExt&&setExpandHcp(expandHcp===p.key?null:p.key)} style={{cursor:isExt?"default":"pointer"}}>
-                        <div style={{fontSize:14,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
-                          {p.name}
-                          {!isExt&&strks>0&&<span style={{fontSize:10,background:C.sand,padding:"1px 5px",borderRadius:6,color:C.charcoal,marginLeft:4}}>+{strks}</span>}
-                          {isExt&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}> (guest)</span>}
-                        </div>
-                        <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>
-                          {isExt ? `HCP ${p.index}` : `HCP ${p.index} · tap for details`}
-                        </div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        {netVal!==null&&(
-                          <div style={{textAlign:"right"}}>
-                            <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{showNet?"Net":"Gross→Net"}</div>
-                            <div style={{fontSize:18,fontWeight:700,color:C.forest}}>{showNet?netVal:gross}</div>
-                            {!showNet&&<div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>net {netVal}</div>}
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            {netVal!==null&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{showNet?"Net":"→Net"}</div><div style={{fontSize:18,fontWeight:700,color:C.forest}}>{showNet?netVal:gross}</div>{!showNet&&<div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>net {netVal}</div>}</div>}
+                            <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(p.key,e.target.value)} placeholder="—"
+                              style={{width:52,height:44,border:`2px solid ${grossVal?C.forest:C.light}`,borderRadius:12,textAlign:"center",fontSize:20,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
                           </div>
-                        )}
-                        <input type="number" min="1" max="15" value={grossVal}
-                          onChange={e=>setScore(p.key,e.target.value)} placeholder="—"
-                          style={{width:52,height:44,border:`2px solid ${grossVal?C.forest:C.light}`,borderRadius:12,textAlign:"center",fontSize:20,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
+                        </div>
+                        {!isExt&&expandHcp===p.key&&<div style={{background:C.mist,padding:"10px 16px",fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,borderTop:`1px solid ${C.light}`}}><div>HCP Index: <strong>{p.index}</strong></div><div>Course HCP: <strong>{p.ch}</strong></div><div>Playing HCP: <strong>{p.ph}</strong></div><div>Match strokes: <strong>{p.ms>0?`+${p.ms}`:0}</strong></div><div>Strokes this hole (SI {si}): <strong>{strks>0?`+${strks}`:"None"}</strong></div></div>}
                       </div>
-                    </div>
-                    {!isExt&&expandHcp===p.key&&(
-                      <div style={{background:C.mist,padding:"10px 16px",fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,borderTop:`1px solid ${C.light}`}}>
-                        <div>HCP Index: <strong>{p.index}</strong></div>
-                        <div>Course HCP: <strong>{p.ch}</strong></div>
-                        <div>Playing HCP: <strong>{p.ph}</strong></div>
-                        <div>Match strokes: <strong>{p.ms>0?`+${p.ms}`:0}</strong></div>
-                        <div>Strokes this hole (SI {si}): <strong>{strks>0?`+${strks}`:"None"}</strong></div>
+                    );
+                  })}
+                </div>
+                <div style={{background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",border:`1.5px solid ${p2Team==="red"?C.redBg:C.blueBg}`}}>
+                  <div style={{background:p2Team==="red"?C.red:C.blue,padding:"8px 16px",color:C.white,fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>{match.p2}</div>
+                  {p2Players.map(p=>{
+                    const isExt=p.isExternal,grossVal=curScores[p.key]??"",gross=parseInt(grossVal);
+                    const strks=!isExt&&!isNaN(gross)&&gross>0?sOnHole(p.ms,si):0;
+                    const netVal=!isNaN(gross)&&gross>0?(isExt?getNetLive(p.key,curScores,holeNum):gross-sOnHole(p.ms,si)):null;
+                    return(
+                      <div key={p.key}>
+                        <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div onClick={()=>!isExt&&setExpandHcp(expandHcp===p.key?null:p.key)} style={{cursor:isExt?"default":"pointer"}}>
+                            <div style={{fontSize:14,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
+                              {p.name}{!isExt&&strks>0&&<span style={{fontSize:10,background:C.sand,padding:"1px 5px",borderRadius:6,color:C.charcoal,marginLeft:4}}>+{strks}</span>}
+                              {isExt&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}> (guest)</span>}
+                            </div>
+                            <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{isExt?`HCP ${p.index||"?"}`:`HCP ${p.index} · tap for details`}</div>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            {netVal!==null&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{showNet?"Net":"→Net"}</div><div style={{fontSize:18,fontWeight:700,color:C.forest}}>{showNet?netVal:gross}</div>{!showNet&&<div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>net {netVal}</div>}</div>}
+                            <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(p.key,e.target.value)} placeholder="—"
+                              style={{width:52,height:44,border:`2px solid ${grossVal?C.forest:C.light}`,borderRadius:12,textAlign:"center",fontSize:20,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
+                          </div>
+                        </div>
+                        {!isExt&&expandHcp===p.key&&<div style={{background:C.mist,padding:"10px 16px",fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,borderTop:`1px solid ${C.light}`}}><div>HCP Index: <strong>{p.index}</strong></div><div>Course HCP: <strong>{p.ch}</strong></div><div>Playing HCP: <strong>{p.ph}</strong></div><div>Match strokes: <strong>{p.ms>0?`+${p.ms}`:0}</strong></div><div>Strokes this hole (SI {si}): <strong>{strks>0?`+${strks}`:"None"}</strong></div></div>}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Preview + submit */}
-            {preview&&(()=>{
-              const color=preview==="p1"?(p1Team==="red"?C.red:C.blue):preview==="p2"?(p2Team==="red"?C.red:C.blue):C.slate;
-              const text=preview==="p1"?`${match.p1} wins hole`:preview==="p2"?`${match.p2} wins hole`:"Hole halved";
-              const bg=preview==="p1"?(p1Team==="red"?C.redBg:C.blueBg):preview==="p2"?(p2Team==="red"?C.redBg:C.blueBg):C.mist;
-              return(<div style={{background:bg,borderRadius:14,padding:"12px 16px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:700,color,fontFamily:"Arial,sans-serif"}}>{text}</div><div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3}}>Best net · tap Submit to confirm</div></div>);
-            })()}
-            <button onClick={()=>allEntered&&submitHole()}
-              disabled={!allEntered}
-              style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{
-                boxShadow:"0 6px 20px rgba(27,67,50,.25)",
-                opacity: allEntered?1:0.4,
-              })}>
-              {allEntered ? `Submit Hole ${holeNum} →` : "Enter scores to continue"}
-            </button>
-            </>
+                    );
+                  })}
+                </div>
+              </>
             )}
+
+            {/* Hole result preview */}
+            {preview&&(()=>{
+              const col=preview==="p1"?(p1Team==="red"?C.red:C.blue):preview==="p2"?(p2Team==="red"?C.red:C.blue):C.slate;
+              const txt=preview==="p1"?`${match.p1} wins hole`:preview==="p2"?`${match.p2} wins hole`:"Hole halved";
+              const bg2=preview==="p1"?(p1Team==="red"?C.redBg:C.blueBg):preview==="p2"?(p2Team==="red"?C.redBg:C.blueBg):C.mist;
+              return(<div style={{background:bg2,borderRadius:14,padding:"12px 16px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:700,color:col,fontFamily:"Arial,sans-serif"}}>{txt}</div><div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3}}>Tap Submit to confirm</div></div>);
+            })()}
+
+            {/* Submit button — always visible, greyed when not ready */}
+            <button onClick={submitHole} disabled={!allEntered}
+              style={{...bigBtn(`linear-gradient(135deg,${allEntered?C.forest:"#9CA3AF"},${allEntered?C.fairway:"#D1D5DB"})`,C.white),
+                boxShadow:allEntered?"0 6px 20px rgba(27,67,50,.25)":"none",
+                cursor:allEntered?"pointer":"not-allowed"}}>
+              {allEntered?`Submit Hole ${holeNum} →`:"Enter at least one score per side"}
+            </button>
           </>
         )}
 
@@ -4150,7 +4101,14 @@ export default function App(){
 
   const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup"];
   const showNav    = navScreens.includes(screen);
-  const goMatch    = (matchId, dest) => { setSelectedMatchId(matchId); setScreen(dest); };
+  const goMatch = (matchId, dest) => {
+    setSelectedMatchId(matchId);
+    if(dest === "creatematch"){
+      const m = matches.find(m=>m.id===matchId);
+      setEditMatch(m || null);
+    }
+    setScreen(dest);
+  };
 
   const loadTrip = useCallback(async (trip) => {
     setTripLoading(true);
@@ -4268,16 +4226,22 @@ export default function App(){
 
   const handleMatchCreated = useCallback((newMatch) => {
     setMatches(prev => {
-      // Delete — remove from list
       if(newMatch.status === "deleted"){
         return prev.filter(m => m.id !== newMatch.id);
       }
-      // Edit — replace existing
       const exists = prev.find(m => m.id === newMatch.id);
       if(exists){
-        return prev.map(m => m.id === newMatch.id ? {...m, ...newMatch} : m);
+        // Preserve live scoring data — never wipe holeScores or thru on edit
+        return prev.map(m => m.id === newMatch.id ? {
+          ...m,
+          ...newMatch,
+          // Always keep existing scores/progress intact
+          holeScores: m.holeScores || newMatch.holeScores || {},
+          thru:       m.thru       || newMatch.thru       || 0,
+          liveScore:  m.liveScore  || newMatch.liveScore  || null,
+          status:     m.status === "live" ? "live" : (newMatch.status || m.status),
+        } : m);
       }
-      // Create — append
       return [...prev, newMatch];
     });
   }, []);
@@ -4308,7 +4272,7 @@ export default function App(){
             {screen==="login"       &&<LoginScreen        onAuth={handleAuth}/>}
             {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="matches"     &&<MatchesScreen      go={setScreen} {...matchProps}/>}
-            {screen==="live"        &&<LiveMatchScreen    go={setScreen} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
+            {screen==="live"        &&<LiveMatchScreen    go={setScreen} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="board"       &&<LeaderboardScreen  go={setScreen} {...matchProps}/>}
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
