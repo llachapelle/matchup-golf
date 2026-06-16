@@ -2115,13 +2115,13 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
               </>
             )}
 
-            {/* Hole result preview */}
-            {preview&&(()=>{
+            {/* Hole result preview — match play only */}
+            {!isScramble && preview&&(()=>{
               const col=preview==="p1"?(p1Team==="red"?C.red:C.blue):preview==="p2"?(p2Team==="red"?C.red:C.blue):C.slate;
-              const txt=preview==="p1"?`${match.p1} wins hole`:preview==="p2"?`${match.p2} wins hole`:"Hole halved";
+              const txt=preview==="p1"?`${match.p1} wins hole`:preview==="p2"?`${match.p2} wins hole`:"Hole tied";
               const bg2=preview==="p1"?(p1Team==="red"?C.redBg:C.blueBg):preview==="p2"?(p2Team==="red"?C.redBg:C.blueBg):C.mist;
               return(<div style={{background:bg2,borderRadius:14,padding:"12px 16px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:700,color:col,fontFamily:"Arial,sans-serif"}}>{txt}</div><div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3}}>Tap Submit to confirm</div></div>);
-            })()}
+            })()} 
 
             <button onClick={submitHole} disabled={!allEntered}
               style={{...bigBtn(`linear-gradient(135deg,${allEntered?C.forest:"#9CA3AF"},${allEntered?C.fairway:"#D1D5DB"})`,C.white),
@@ -2164,8 +2164,36 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                     ))}
                     <div style={{width:26,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{playedHoles.reduce((s,h)=>s+course.pars[h-1],0)}</div>
                   </div>
-                  {/* Player rows — all players including guests */}
-                  {[...p1Players,...p2Players].map((p,pi)=>{
+                  {/* Player/team rows */}
+                  {isScramble ? (
+                    // Scramble: show one row per team with team scores
+                    [{label:match.p1, team:p1Team, key:"team_p1"}, {label:match.p2, team:p2Team, key:"team_p2"}].map(side=>{
+                      const tc = side.team==="red"?C.red:C.blue;
+                      const total = playedHoles.reduce((s,h)=>{const v=parseInt((holeScores[h]||{})[side.key]);return s+(isNaN(v)?0:v);},0);
+                      return(
+                        <div key={side.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
+                          <div style={{width:46,fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {side.label.split(" / ")[0]}
+                          </div>
+                          {playedHoles.map(h=>{
+                            const val=(holeScores[h]||{})[side.key];
+                            const gross=parseInt(val);
+                            const par=course.pars[h-1];
+                            const bg=!isNaN(gross)&&gross>0?(gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg):C.smoke;
+                            const col=!isNaN(gross)&&gross>0?(gross<par?C.green:gross===par?C.charcoal:gross===par+1?C.amber:C.red):C.gray;
+                            return(
+                              <div key={h} style={{flex:1,minWidth:20,height:20,borderRadius:4,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                <span style={{fontSize:9,fontWeight:700,color:col,fontFamily:"Arial,sans-serif"}}>{!isNaN(gross)&&gross>0?gross:"·"}</span>
+                              </div>
+                            );
+                          })}
+                          <div style={{width:26,textAlign:"center",fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif"}}>{total>0?total:"—"}</div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    // Match play: show individual player rows
+                    [...p1Players,...p2Players].map((p,pi)=>{
                     const isExt = p.isExternal;
                     const sideColor = pi<p1Players.length
                       ? (p1Team==="red"?C.red:C.blue)
@@ -2191,8 +2219,9 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                         <div style={{width:26,textAlign:"center",fontSize:10,fontWeight:700,color:sideColor,fontFamily:"Arial,sans-serif"}}>{total>0?total:"—"}</div>
                       </div>
                     );
-                  })}
-                  {/* Hole result row */}
+                  }))}
+                  {/* Hole result row — match play only */}
+                  {!isScramble&&(
                   <div style={{display:"flex",gap:2,marginTop:6,alignItems:"center"}}>
                     <div style={{width:46,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",flexShrink:0}}>Result</div>
                     {playedHoles.map(h=>{
@@ -2208,6 +2237,7 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                     })}
                     <div style={{width:26}}/>
                   </div>
+                  )}
                 </div>
               )}
             </div>
