@@ -1984,11 +1984,55 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
           <div style={{color:"rgba(255,255,255,.65)",fontSize:11,fontFamily:"Arial,sans-serif",marginBottom:3}}>
             {course.name}{match.tee_name ? ` · ${match.tee_name} Tees` : ""} · {format}
           </div>
-        <div style={{color:C.white,fontSize:14,fontWeight:700,fontFamily:"Arial,sans-serif"}}>{match.p1} <span style={{color:"rgba(255,255,255,.45)"}}>vs</span> {match.p2}</div>
-        <div style={{fontSize:22,fontWeight:700,color:status.color,marginTop:6,letterSpacing:"-.5px"}}>
-          {status.text}
-          {confirmedThru>0&&<span style={{fontSize:13,color:"rgba(255,255,255,.5)",fontWeight:400}}> thru {confirmedThru}</span>}
+        <div style={{color:C.white,fontSize:14,fontWeight:700,fontFamily:"Arial,sans-serif"}}>
+          {isScramble?(
+            // Scramble: show team colors, not player names
+            <span>
+              <span style={{color:p1Team==="red"?C.sand:"#93C5FD"}}>Team {p1Team==="red"?"Red":"Blue"}</span>
+              <span style={{color:"rgba(255,255,255,.45)"}}> vs </span>
+              <span style={{color:p2Team==="red"?C.sand:"#93C5FD"}}>Team {p2Team==="red"?"Red":"Blue"}</span>
+            </span>
+          ):(
+            <span>{match.p1} <span style={{color:"rgba(255,255,255,.45)"}}>vs</span> {match.p2}</span>
+          )}
         </div>
+        {/* Scramble score to par display */}
+        {isScramble?(()=>{
+          let t1=0,t2=0,h1=0,h2=0,totalPar=0;
+          for(let h=1;h<=18;h++){
+            const hs=holeScores[h]||{};
+            const s1=parseInt(hs["team_p1"]),s2=parseInt(hs["team_p2"]);
+            const p=course.pars[h-1]||4;
+            if(!isNaN(s1)&&s1>0){t1+=s1;h1++;totalPar+=p;}
+            if(!isNaN(s2)&&s2>0){t2+=s2;h2++;}
+          }
+          const fmt=(total,holes)=>{
+            if(holes===0) return "—";
+            const parSoFar=course.pars.slice(0,holes).reduce((a,b)=>a+b,0);
+            const diff=total-parSoFar;
+            return `${total} (${diff===0?"E":diff>0?`+${diff}`:diff})`;
+          };
+          const tc1=p1Team==="red"?C.sand:"#93C5FD";
+          const tc2=p2Team==="red"?C.sand:"#93C5FD";
+          return(
+            <div style={{display:"flex",gap:16,marginTop:8}}>
+              <div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.55)",fontFamily:"Arial,sans-serif"}}>Team {p1Team==="red"?"Red":"Blue"}{h1>0?` · thru ${h1}`:""}</div>
+                <div style={{fontSize:20,fontWeight:700,color:tc1}}>{fmt(t1,h1)}</div>
+              </div>
+              <div style={{width:1,background:"rgba(255,255,255,.2)"}}/>
+              <div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.55)",fontFamily:"Arial,sans-serif"}}>Team {p2Team==="red"?"Red":"Blue"}{h2>0?` · thru ${h2}`:""}</div>
+                <div style={{fontSize:20,fontWeight:700,color:tc2}}>{fmt(t2,h2)}</div>
+              </div>
+            </div>
+          );
+        })():(
+          <div style={{fontSize:22,fontWeight:700,color:status.color,marginTop:6,letterSpacing:"-.5px"}}>
+            {status.text}
+            {confirmedThru>0&&<span style={{fontSize:13,color:"rgba(255,255,255,.5)",fontWeight:400}}> thru {confirmedThru}</span>}
+          </div>
+        )}
       </div>
 
       {/* Hole progress dots */}
@@ -3378,7 +3422,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 
 // ─── COURSE SETUP SCREEN ──────────────────────────────────────────────────────
 function CourseSetupScreen({go, activeTrip, onCourseAdded}){
-  const [step,       setStep]      = useState(1); // 1=course details, 2=tee boxes
+  const [step,       setStep]      = useState(1);
   const [name,       setName]      = useState("");
   const [city,       setCity]      = useState("");
   const [state,      setState]     = useState("");
@@ -3388,15 +3432,111 @@ function CourseSetupScreen({go, activeTrip, onCourseAdded}){
   ]);
   const [saving,     setSaving]    = useState(false);
   const [error,      setError]     = useState("");
+  const [scanning,   setScanning]  = useState(false);
+  const [scanMsg,    setScanMsg]   = useState("");
+  const fileRef = React.useRef(null);
 
   const TEE_COLORS = ["blue","white","gold","red","green","black","platinum"];
+  const updateTee = (i, field, val) => setTees(prev=>{const t=[...prev]; t[i]={...t[i],[field]:val}; return t;});
+  const addTee    = () => setTees(prev=>[...prev,{name:"",color:"white",slope:"",rating:"",par:"72",yardage:""}]);
+  const removeTee = i  => setTees(prev=>prev.filter((_,idx)=>idx!==i));
 
-  const updateTee = (i, field, val) => {
-    setTees(prev=>{const t=[...prev]; t[i]={...t[i],[field]:val}; return t;});
+  // ── AI Scorecard Scanner ────────────────────────────────────────────────────
+  const scanScorecard = async (file) => {
+    if(!file) return;
+    setScanning(true); setScanMsg("Reading scorecard…"); setError("");
+    try {
+      // Convert image to base64
+      const base64 = await new Promise((res,rej)=>{
+        const reader = new FileReader();
+        reader.onload = ()=>res(reader.result.split(",")[1]);
+        reader.onerror = ()=>rej(new Error("Failed to read image"));
+        reader.readAsDataURL(file);
+      });
+      const mediaType = file.type || "image/jpeg";
+      setScanMsg("Analyzing scorecard with AI…");
+
+      const response = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1500,
+          messages:[{
+            role:"user",
+            content:[
+              {
+                type:"image",
+                source:{type:"base64", media_type:mediaType, data:base64}
+              },
+              {
+                type:"text",
+                text:`You are reading a golf scorecard image. Extract all course data and return ONLY valid JSON with no other text, no markdown, no explanation.
+
+Return this exact structure:
+{
+  "courseName": "string",
+  "city": "string or null",
+  "state": "string or null",
+  "tees": [
+    {
+      "name": "Blue",
+      "color": "blue",
+      "slope": 138,
+      "rating": 74.3,
+      "par": 72,
+      "holes": [
+        {"hole":1,"par":4,"yardage":425,"strokeIndex":7},
+        ...all 18 holes...
+      ]
+    }
+  ]
+}
+
+Rules:
+- Include every tee set visible (Blue, White, Gold, Red, etc.)
+- color field must be one of: blue, white, gold, red, green, black, platinum
+- strokeIndex is the hole handicap number (1=hardest, 18=easiest)
+- If a value is not visible, use null
+- Return ONLY the JSON object, nothing else`
+              }
+            ]
+          }]
+        })
+      });
+
+      const data = await response.json();
+      if(data.error) throw new Error(data.error.message||"API error");
+
+      const text = data.content?.find(b=>b.type==="text")?.text||"";
+      const clean = text.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+
+      // Populate form fields from scan result
+      if(parsed.courseName) setName(parsed.courseName);
+      if(parsed.city)  setCity(parsed.city);
+      if(parsed.state) setState(parsed.state);
+
+      if(parsed.tees?.length>0){
+        setTees(parsed.tees.map(t=>({
+          name:     t.name    || "Blue",
+          color:    t.color   || "blue",
+          slope:    t.slope   ? String(t.slope) : "",
+          rating:   t.rating  ? String(t.rating): "",
+          par:      t.par     ? String(t.par)   : "72",
+          yardage:  t.holes   ? String(t.holes.reduce((s,h)=>s+(h.yardage||0),0)) : "",
+          holes:    t.holes   || [],
+        })));
+      }
+
+      setScanMsg(`✓ Found ${parsed.tees?.length||0} tee sets from ${parsed.courseName||"scorecard"}. Review and confirm below.`);
+      setStep(2);
+    } catch(e){
+      setError("Scan failed: "+e.message+". Try a clearer photo or enter manually.");
+      setScanMsg("");
+    }
+    setScanning(false);
   };
-
-  const addTee = () => setTees(prev=>[...prev,{name:"",color:"white",slope:"",rating:"",par:"72",yardage:""}]);
-  const removeTee = i => setTees(prev=>prev.filter((_,idx)=>idx!==i));
 
   const saveCourse = async () => {
     if(!name.trim()){ setError("Enter course name"); return; }
@@ -3410,15 +3550,15 @@ function CourseSetupScreen({go, activeTrip, onCourseAdded}){
         state:      state.trim()||null,
         trip_id:    activeTrip?.id||null,
       });
-      // Save tee boxes
       await db.post("tee_boxes", validTees.map(t=>({
-        course_id: course.id,
-        name:      t.name,
-        color:     t.color||"blue",
-        slope:     parseInt(t.slope),
-        rating:    parseFloat(t.rating),
-        par:       parseInt(t.par)||72,
-        yardage:   t.yardage?parseInt(t.yardage):null,
+        course_id:  course.id,
+        name:       t.name,
+        color:      t.color||"blue",
+        slope:      parseInt(t.slope),
+        rating:     parseFloat(t.rating),
+        par:        parseInt(t.par)||72,
+        yardage:    t.yardage?parseInt(t.yardage):null,
+        hole_data:  t.holes?.length>0 ? JSON.stringify(t.holes) : null,
       })));
       onCourseAdded && onCourseAdded({...course, tee_boxes: validTees.map(t=>({...t,course_id:course.id}))});
       go("creatematch");
@@ -3455,6 +3595,29 @@ function CourseSetupScreen({go, activeTrip, onCourseAdded}){
         {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif"}}>{error}</div>}
 
         {step===1&&(<>
+          {/* Hidden file input for camera/photo */}
+          <input ref={fileRef} type="file" accept="image/*" capture="environment"
+            style={{display:"none"}}
+            onChange={e=>{ if(e.target.files?.[0]) scanScorecard(e.target.files[0]); }}/>
+
+          {/* AI Scan card */}
+          <div style={{...card({background:`linear-gradient(135deg,${C.forest},${C.fairway})`})}}>
+            <div style={{color:C.white,fontSize:15,fontWeight:700,marginBottom:4}}>📷 Scan Scorecard</div>
+            <div style={{color:"rgba(255,255,255,.75)",fontSize:12,fontFamily:"Arial,sans-serif",marginBottom:14,lineHeight:1.5}}>
+              Take a photo of the scorecard and AI will automatically fill in course name, slope, rating, par, and hole-by-hole data.
+            </div>
+            {scanMsg&&<div style={{background:"rgba(255,255,255,.15)",borderRadius:10,padding:"8px 12px",color:C.white,fontSize:12,fontFamily:"Arial,sans-serif",marginBottom:12}}>{scanMsg}</div>}
+            <button onClick={()=>fileRef.current?.click()} disabled={scanning}
+              style={{width:"100%",background:scanning?"rgba(255,255,255,.2)":C.sand,border:"none",borderRadius:12,padding:"12px",fontSize:14,fontWeight:700,color:C.charcoal,cursor:scanning?"not-allowed":"pointer",fontFamily:"Arial,sans-serif"}}>
+              {scanning?"Scanning…":"📷 Take Photo of Scorecard"}
+            </button>
+          </div>
+
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{flex:1,height:1,background:C.light}}/>
+            <span style={{color:C.gray,fontSize:12,fontFamily:"Arial,sans-serif"}}>or enter manually</span>
+            <div style={{flex:1,height:1,background:C.light}}/>
+          </div>
           <div style={card()}>
             <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:12}}>Course Details</div>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
