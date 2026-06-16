@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 const SUPA_URL = "https://woxocunvkxyuygytaskm.supabase.co";
@@ -363,6 +363,21 @@ const SIDE_GAMES = [
 ];
 
 const GAME_CATS = ["All","Team","Individual","Any"];
+
+// ─── SCORE LABEL ─────────────────────────────────────────────────────────────
+const scoreLabel = (gross, par) => {
+  if(gross===1)       return "🏆 Hole in One";
+  const diff=gross-par;
+  if(diff<=-4)        return "🦅 Condor";
+  if(diff===-3)       return "🦅 Albatross";
+  if(diff===-2)       return "🦅 Eagle";
+  if(diff===-1)       return "🐦 Birdie";
+  if(diff===0)        return "Par";
+  if(diff===1)        return "Bogey";
+  if(diff===2)        return "Double Bogey";
+  if(diff===3)        return "Triple Bogey";
+  return `+${diff}`;
+};
 
 const calcCH  = (idx,c) => Math.round(idx*(c.slope/113)+(c.rating-c.par));
 const calcPH  = (ch,fmt) => Math.round(ch*((fmt||"").toLowerCase().includes("singles")?1.0:0.90));
@@ -2092,7 +2107,7 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                           <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Hole {holeNum}</div>
                           <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(s.key,e.target.value)} placeholder="—"
                             style={{width:64,height:56,border:`2px solid ${grossVal?tc:C.light}`,borderRadius:14,textAlign:"center",fontSize:26,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
-                          {hasScore&&<div style={{fontSize:11,color:tc,fontFamily:"Arial,sans-serif"}}>{gross<par?"🐦 Birdie":gross===par?"Par":gross===par+1?"Bogey":`+${gross-par}`}</div>}
+                          {hasScore&&<div style={{fontSize:11,color:tc,fontFamily:"Arial,sans-serif"}}>{scoreLabel(gross,par)}</div>}
                           {isScramble&&hasScore&&prevTotal>0&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Total: {prevTotal+gross}</div>}
                         </div>
                       </div>
@@ -3434,7 +3449,7 @@ function CourseSetupScreen({go, activeTrip, onCourseAdded}){
   const [error,      setError]     = useState("");
   const [scanning,   setScanning]  = useState(false);
   const [scanMsg,    setScanMsg]   = useState("");
-  const fileRef = React.useRef(null);
+  const fileRef = useRef(null);
 
   const TEE_COLORS = ["blue","white","gold","red","green","black","platinum"];
   const updateTee = (i, field, val) => setTees(prev=>{const t=[...prev]; t[i]={...t[i],[field]:val}; return t;});
