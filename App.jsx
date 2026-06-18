@@ -632,6 +632,46 @@ function LoginScreen({onAuth}){
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
+// ─── SCRAMBLE DISPLAY HELPER ───────────────────────────────────────────────────
+// For 4v4 scramble-style matches, returns clean "Team Red"/"Team Blue" labels
+// and score-to-par strings instead of long player lists / raw match-play text
+const isScrambleFormat = m => (m.format||"").toLowerCase().includes("scramble");
+
+const getScrambleDisplay = (m) => {
+  const p1Team = (m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "red";
+  const p2Team = (m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "blue";
+  const p1Label = `Team ${p1Team==="red"?"Red":"Blue"}`;
+  const p2Label = `Team ${p2Team==="red"?"Red":"Blue"}`;
+
+  // Compute totals + score-to-par from holeScores if present
+  const hs = m.holeScores || {};
+  let t1=0,t2=0,h1=0,h2=0;
+  // Use real per-hole par data if the match has it, otherwise fall back to demo layout
+  let pars = COURSES.mammoth.pars;
+  if(m.hole_data){
+    try {
+      const parsed = typeof m.hole_data === "string" ? JSON.parse(m.hole_data) : m.hole_data;
+      if(Array.isArray(parsed) && parsed.length === 18) pars = parsed.map(h=>h.par);
+    } catch(e){ /* keep fallback */ }
+  }
+  for(let h=1;h<=18;h++){
+    const s1=parseInt(hs[h]?.["team_p1"]), s2=parseInt(hs[h]?.["team_p2"]);
+    if(!isNaN(s1)&&s1>0){t1+=s1;h1++;}
+    if(!isNaN(s2)&&s2>0){t2+=s2;h2++;}
+  }
+  const toPar = (total,holes) => {
+    if(holes===0) return null;
+    const parSoFar = pars.slice(0,holes).reduce((a,b)=>a+b,0);
+    const diff = total-parSoFar;
+    return `${total} (${diff===0?"E":diff>0?`+${diff}`:diff})`;
+  };
+  return {
+    p1Label, p2Label, p1Team, p2Team,
+    p1Score: toPar(t1,h1), p2Score: toPar(t2,h2),
+    h1, h2,
+  };
+};
+
 function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
   const live = matches.filter(m=>m.status==="live");
   return(
@@ -646,10 +686,32 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
             <span onClick={()=>go("matches")} style={{fontSize:12,color:C.forest,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>All Matches →</span>
           </div>
           {live.map(m=>{
+            const isScr = isScrambleFormat(m);
+
+            if(isScr){
+              const sd = getScrambleDisplay(m);
+              return(
+                <div key={m.id} onClick={()=>goMatch(m.id,"live")} style={{...card({marginBottom:8,cursor:"pointer",border:`1.5px solid ${C.mint}`})}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE · SCRAMBLE</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:sd.p1Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{sd.p1Label}</div>
+                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p1Score||"—"}</div>
+                      {sd.h1>0&&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {sd.h1}</div>}
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:13,fontWeight:700,color:sd.p2Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{sd.p2Label}</div>
+                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p2Score||"—"}</div>
+                      {sd.h2>0&&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {sd.h2}</div>}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
             const p1Team=(m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean)||"red";
             const p2Team=(m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean)||"blue";
             const isSquare=!m.liveScore||m.liveScore.toLowerCase().includes("square");
-            // Determine leading side
             let topSide="p1";
             if(m.liveScore&&!isSquare){
               const ls=m.liveScore.toLowerCase();
@@ -793,6 +855,8 @@ function MatchesScreen({go, goMatch, matches, ts}){
               const topIsWinner = m.status==="completed" && m.winnerSide!=="halve" && topSide!=="p1" ? m.winnerSide==="p2" : m.status==="completed" && m.winnerSide!=="halve";
               // Simpler: top is always the better side for completed/live
               const isHalve = m.winnerSide==="halve";
+              const isScr = isScrambleFormat(m);
+              const scrDisplay = isScr ? getScrambleDisplay(m) : null;
 
               return(
                 <div key={m.id} style={{...card({marginBottom:8,border:
@@ -811,6 +875,23 @@ function MatchesScreen({go, goMatch, matches, ts}){
                         const bottomFW = hasLeader ? 400 : 500;
                         const topCol   = hasLeader ? topColor : C.charcoal;
                         const botCol   = C.gray;
+
+                        // Scramble: clean "Team Red / Team Blue" labels, no leader bolding (stroke play, not match play)
+                        if(isScr){
+                          return(<>
+                            <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p1Team==="red"?C.red:C.blue}}>
+                              {scrDisplay.p1Label}
+                            </div>
+                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p2Team==="red"?C.red:C.blue,marginTop:2}}>
+                              {scrDisplay.p2Label}
+                            </div>
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
+                              <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
+                              {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
+                            </div>
+                          </>);
+                        }
+
                         return(<>
                           <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:topFW,color:topCol}}>
                             {topLabel}
@@ -829,7 +910,12 @@ function MatchesScreen({go, goMatch, matches, ts}){
                       })()}
                     </div>
                     <div style={{textAlign:"right"}}>
-                      {m.status==="live"&&<>
+                      {isScr&&m.status==="live"&&<>
+                        <div style={{fontSize:13,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p1Team==="red"?C.red:C.blue}}>{scrDisplay.p1Score||"—"}</div>
+                        <div style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p2Team==="red"?C.red:C.blue}}>{scrDisplay.p2Score||"—"}</div>
+                        <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
+                      </>}
+                      {!isScr&&m.status==="live"&&<>
                         <div style={{fontSize:14,fontWeight:700,fontFamily:"Arial,sans-serif",color:scoreColor(m.liveScore)}}>{m.liveScore}</div>
                         <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {m.thru}</div>
                         <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
@@ -1545,13 +1631,27 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
     ? {...rawMatch, status:"live"}
     : rawMatch;
 
+  // Parse real per-hole data if the organizer scanned/entered it for this tee.
+  // Falls back to Mammoth Dunes' layout when no real data exists yet.
+  const realHoleData = (() => {
+    if(!match.hole_data) return null;
+    try {
+      const parsed = typeof match.hole_data === "string" ? JSON.parse(match.hole_data) : match.hole_data;
+      if(Array.isArray(parsed) && parsed.length === 18) return parsed;
+    } catch(e){ /* fall through to demo data */ }
+    return null;
+  })();
+
   const course = {
     slope:       match.slope       || COURSES.mammoth.slope,
     rating:      match.rating      || COURSES.mammoth.rating,
     par:         match.par         || COURSES.mammoth.par,
-    strokeIndex: COURSES.mammoth.strokeIndex,
-    pars:        COURSES.mammoth.pars,
+    // Real per-hole stroke index/par when available; otherwise demo layout
+    strokeIndex: realHoleData ? realHoleData.map(h=>h.strokeIndex) : COURSES.mammoth.strokeIndex,
+    pars:        realHoleData ? realHoleData.map(h=>h.par)         : COURSES.mammoth.pars,
+    yardages:    realHoleData ? realHoleData.map(h=>h.yardage)     : null,
     name:        match.course_name || COURSES.mammoth.name,
+    hasRealHoleData: !!realHoleData,
   };
   const format = match.format || "Best Ball";
 
@@ -2066,13 +2166,18 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
       <div style={{flex:1,padding:14,display:"flex",flexDirection:"column",gap:10,overflowY:"auto"}}>
         {/* Hole info */}
         <div style={card({display:"flex",justifyContent:"space-around"})}>
-          {[["Hole",holeNum],["Par",par],["SI",si],[course.tee||"Blue","Tees"]].map(([l,v])=>(
+          {[["Hole",holeNum],["Par",par],["SI",si],...(course.yardages?.[holeNum-1]?[["Yds",course.yardages[holeNum-1]]]:[[course.tee||"Blue","Tees"]])].map(([l,v])=>(
             <div key={l} style={{textAlign:"center"}}>
               <div style={{fontSize:19,fontWeight:700,color:C.charcoal}}>{v}</div>
               <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{l}</div>
             </div>
           ))}
         </div>
+        {!course.hasRealHoleData&&(
+          <div style={{background:C.amberBg,borderRadius:10,padding:"6px 12px",fontSize:11,color:C.amber,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+            ⚠️ Using default hole layout — scan or enter this course's scorecard for accurate stroke allocation
+          </div>
+        )}
 
         {quickMode?(
           <div style={card({textAlign:"center"})}>
@@ -3804,6 +3909,10 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
         slope:         selectedTee?.slope   ? parseInt(selectedTee.slope)    : (isEdit ? editMatch.slope  : null),
         rating:        selectedTee?.rating  ? parseFloat(selectedTee.rating) : (isEdit ? editMatch.rating : null),
         par:           selectedTee?.par     ? parseInt(selectedTee.par)      : (isEdit ? editMatch.par    : null),
+        // Per-hole par/yardage/stroke-index data from the selected tee (if scanned/entered)
+        hole_data:     selectedTee?.holes?.length>0 ? JSON.stringify(selectedTee.holes)
+                       : selectedTee?.hole_data ? (typeof selectedTee.hole_data==="string"?selectedTee.hole_data:JSON.stringify(selectedTee.hole_data))
+                       : (isEdit ? editMatch.hole_data : null),
       };
       if(activeTrip) matchData.trip_id = activeTrip.id;
 
@@ -3822,6 +3931,7 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
           slope:         matchData.slope,
           rating:        matchData.rating,
           par:           matchData.par,
+          hole_data:     matchData.hole_data,
         });
         onMatchCreated && onMatchCreated({
           ...editMatch,
@@ -3837,6 +3947,7 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
           slope:       matchData.slope,
           rating:      matchData.rating,
           par:         matchData.par,
+          hole_data:   matchData.hole_data,
         });
       } else {
         // Create new match
@@ -3848,6 +3959,7 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
           p2Keys: p2Players.map(p=>p.name.toLowerCase()),
           round:1, day:"Trip Day", holeScores:{}, format,
           status:"upcoming", winnerSide:null, thru:0,
+          hole_data: matchData.hole_data,
         });
       }
       go("trip");
@@ -4414,6 +4526,7 @@ export default function App(){
           slope:       m.slope       || null,
           rating:      m.rating      || null,
           par:         m.par         || null,
+          hole_data:   m.hole_data   || null,
           holeScores:  {},
         }));
         setMatches(appMatches);
