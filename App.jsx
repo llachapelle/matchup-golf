@@ -2772,44 +2772,44 @@ function WHSBreakdown(){
 }
 
 // ─── LEADERBOARD ──────────────────────────────────────────────────────────────
-function LeaderboardScreen({go, ts, playerRecords, matches}){
+function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeTrip}){
   const [sortBy,  setSortBy] = useState("Points");
   const [showAll, setShowAll]= useState(false);
   const parseWins = rec => parseInt((rec||"0–0–0").split("–")[0])||0;
 
-  // Determine which team a guest belongs to by looking at their match pairings
-  const guestTeamColor = (key) => {
-    for(const m of matches){
-      const inP1=(m.p1||"").toLowerCase().includes(key);
-      const inP2=(m.p2||"").toLowerCase().includes(key);
-      if(inP1){
-        const t=( m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean);
-        if(t) return t;
-      }
-      if(inP2){
-        const t=(m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean);
-        if(t) return t;
-      }
-    }
-    return "red";
-  };
+  // Use real trip players if available, otherwise fall back to demo RAW data
+  const usingRealData = tripPlayers && tripPlayers.length > 0;
 
-  // All trip participants: RAW members + guests who have actually played a match
-  const guestsWhoPlayed = Object.values(GUEST_PLAYERS).filter(g=>
-    playerRecords[g.key] && (playerRecords[g.key].w+playerRecords[g.key].l+playerRecords[g.key].h) > 0
-  );
-
-  const allParticipants = [
-    ...RAW.map(p=>({...p, isGuest:false, ...(PLAYER_ROUNDS[p.key]||{})})),
-    ...guestsWhoPlayed.map(g=>({
-      ...g,
-      team:    guestTeamColor(g.key),
-      isGuest: true,
-      money:   0,
-      skinsWon:0,
-      rounds:  [],
-    })),
-  ];
+  const allParticipants = usingRealData
+    ? tripPlayers.map(tp => ({
+        key:    tp.name.toLowerCase(),
+        name:   tp.name,
+        team:   tp.team || "red",
+        index:  tp.hcp_index,
+        isGuest:!!tp.is_guest,
+        money:  0,
+        skinsWon:0,
+        rounds: [],
+      }))
+    : (() => {
+        // Demo fallback: RAW + any GUEST_PLAYERS who actually played
+        const guestTeamColor = (key) => {
+          for(const m of matches){
+            const inP1=(m.p1||"").toLowerCase().includes(key);
+            const inP2=(m.p2||"").toLowerCase().includes(key);
+            if(inP1){ const t=(m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean); if(t) return t; }
+            if(inP2){ const t=(m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean); if(t) return t; }
+          }
+          return "red";
+        };
+        const guestsWhoPlayed = Object.values(GUEST_PLAYERS).filter(g=>
+          playerRecords[g.key] && (playerRecords[g.key].w+playerRecords[g.key].l+playerRecords[g.key].h) > 0
+        );
+        return [
+          ...RAW.map(p=>({...p, isGuest:false, ...(PLAYER_ROUNDS[p.key]||{})})),
+          ...guestsWhoPlayed.map(g=>({...g, team:guestTeamColor(g.key), isGuest:true, money:0, skinsWon:0, rounds:[]})),
+        ];
+      })();
 
   const players = allParticipants.map(p=>({
     ...p,
@@ -2836,7 +2836,7 @@ function LeaderboardScreen({go, ts, playerRecords, matches}){
 
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
-      <Header sub="⛳ MatchUp Golf" title="Leaderboard" detail="Sand Valley Ryder Cup 2026" onProfile={()=>go("profile")}/>
+      <Header sub="⛳ MatchUp Golf" title="Leaderboard" detail={activeTrip?.name||"Sand Valley Ryder Cup 2026"} onProfile={()=>go("profile")}/>
       <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         <TeamScoreCards ts={ts}/>
 
@@ -4649,7 +4649,7 @@ export default function App(){
             {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="matches"     &&<MatchesScreen      go={setScreen} {...matchProps}/>}
             {screen==="live"        &&<LiveMatchScreen    go={setScreen} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
-            {screen==="board"       &&<LeaderboardScreen  go={setScreen} {...matchProps}/>}
+            {screen==="board"       &&<LeaderboardScreen  go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
             {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
