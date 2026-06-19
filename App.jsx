@@ -306,11 +306,12 @@ function derivePlayerRecords(matches) {
 // players into two sides (Nassau) or a pool (Skins), e.g. a private 1v1
 // side bet between two guys inside a larger 4-person scramble.
 
-// Helper: find a player's gross score for a given hole across ALL matches
-// they appear in during the trip (a player only appears in one live match
-// at a time, so this just locates which match holds their score for that hole).
-const getPlayerHoleScore = (matches, playerKey, hole) => {
-  for(const m of matches){
+// Helper: find a player's gross score for a given hole, scoped to ONE match
+// (so a side game attached to a specific round only reads that round's scores,
+// not every match the player has ever appeared in across the whole trip).
+const getPlayerHoleScore = (matches, playerKey, hole, scopedMatchId=null) => {
+  const pool = scopedMatchId ? matches.filter(m=>m.id===scopedMatchId) : matches;
+  for(const m of pool){
     const hs = m.holeScores?.[hole];
     if(hs && hs[playerKey]!==undefined){
       const v = parseInt(hs[playerKey]);
@@ -320,13 +321,13 @@ const getPlayerHoleScore = (matches, playerKey, hole) => {
   return null;
 };
 
-// Nassau for a custom group: side1Keys vs side2Keys (1v1, 2v2, etc.)
-function deriveNassauForGroup(matches, side1Keys, side2Keys, betAmount=10) {
+// Nassau for a custom group: side1Keys vs side2Keys (1v1, 2v2, etc.), scoped to one match/round
+function deriveNassauForGroup(matches, side1Keys, side2Keys, betAmount=10, scopedMatchId=null) {
   const segment = (startH, endH) => {
     let s1Wins=0, s2Wins=0, holesPlayed=0;
     for(let h=startH; h<=endH; h++){
-      const s1Scores = side1Keys.map(k=>getPlayerHoleScore(matches,k,h)).filter(v=>v!==null);
-      const s2Scores = side2Keys.map(k=>getPlayerHoleScore(matches,k,h)).filter(v=>v!==null);
+      const s1Scores = side1Keys.map(k=>getPlayerHoleScore(matches,k,h,scopedMatchId)).filter(v=>v!==null);
+      const s2Scores = side2Keys.map(k=>getPlayerHoleScore(matches,k,h,scopedMatchId)).filter(v=>v!==null);
       if(s1Scores.length===0 || s2Scores.length===0) continue;
       holesPlayed++;
       const s1Best = Math.min(...s1Scores), s2Best = Math.min(...s2Scores);
@@ -340,15 +341,15 @@ function deriveNassauForGroup(matches, side1Keys, side2Keys, betAmount=10) {
   return { front: segment(1,9), back: segment(10,18), overall: segment(1,18) };
 }
 
-// Skins for a custom pool of players (any size, any group)
-function deriveSkinsForGroup(matches, playerKeys, skinAmount=5) {
+// Skins for a custom pool of players, scoped to one match/round
+function deriveSkinsForGroup(matches, playerKeys, skinAmount=5, scopedMatchId=null) {
   const skinsByPlayer = {};
   const holes = [];
   let carryover = 0;
 
   for(let h=1; h<=18; h++){
     const scoresThisHole = playerKeys
-      .map(k=>({key:k, score:getPlayerHoleScore(matches,k,h)}))
+      .map(k=>({key:k, score:getPlayerHoleScore(matches,k,h,scopedMatchId)}))
       .filter(s=>s.score!==null);
     if(scoresThisHole.length===0) continue;
 
@@ -3091,8 +3092,9 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
 // ─── SIDE GAME SETUP SCREEN ───────────────────────────────────────────────────
 // Lets the organizer create a fully custom Nassau (1v1, 2v2, etc.) or Skins
 // pool independent of the official match pairings.
-function SideGameSetupScreen({go, activeTrip, tripPlayers, onGameCreated}){
+function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreated}){
   const [gameType,  setGameType]  = useState("nassau"); // 'nassau' | 'skins'
+  const [matchId,   setMatchId]   = useState(matches?.[0]?.id || null); // which round/match this game is scoped to
   const [side1,     setSide1]     = useState([]);
   const [side2,     setSide2]     = useState([]);
   const [pool,      setPool]      = useState([]);
@@ -3101,9 +3103,13 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, onGameCreated}){
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState("");
 
-  const displayPlayers = tripPlayers.length > 0
+  // Only players in the SELECTED match are eligible — keeps side games scoped to one round
+  const selectedMatch = matches?.find(m=>m.id===matchId);
+  const eligibleKeys = selectedMatch ? [...(selectedMatch.p1Keys||[]),...(selectedMatch.p2Keys||[])] : [];
+  const displayPlayers = (tripPlayers.length > 0
     ? tripPlayers.map(p=>({key:p.name.toLowerCase(), name:p.name, team:p.team}))
-    : RAW.map(p=>({key:p.key, name:p.name, team:p.team}));
+    : RAW.map(p=>({key:p.key, name:p.name, team:p.team}))
+  ).filter(p => eligibleKeys.length===0 || eligibleKeys.includes(p.key));
 
   const toggleInList = (key, list, setList, otherList) => {
     if(list.includes(key)) setList(list.filter(k=>k!==key));
@@ -3124,16 +3130,18 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, onGameCreated}){
     }
   };
 
-  const canSave = gameType==="nassau"
+  const canSave = !!matchId && (gameType==="nassau"
     ? side1.length>0 && side2.length>0
-    : pool.length>=2;
+    : pool.length>=2);
 
   const saveGame = async () => {
+    if(!matchId){ setError("Pick a round first"); return; }
     if(!canSave){ setError(gameType==="nassau" ? "Pick at least one player per side" : "Pick at least 2 players"); return; }
     setSaving(true); setError("");
     try {
       const payload = {
         trip_id:    activeTrip?.id || null,
+        match_id:   matchId,
         type:       gameType,
         name:       gameName.trim() || null,
         side1_keys: gameType==="nassau" ? side1 : null,
@@ -3144,7 +3152,7 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, onGameCreated}){
       };
       const [saved] = await db.post("side_games", payload);
       onGameCreated && onGameCreated({
-        id: saved?.id || Date.now(),
+        id: saved?.id || Date.now(), matchId,
         type: gameType, name: gameName.trim()||null,
         side1Keys: side1, side2Keys: side2, poolKeys: pool, betAmount,
       });
@@ -3165,6 +3173,26 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, onGameCreated}){
 
       <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif"}}>{error}</div>}
+
+        {/* Round / match scoping — REQUIRED so the game doesn't pull scores from the whole trip */}
+        <div style={card()}>
+          <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:8}}>Which round?</div>
+          {(!matches || matches.length===0) ? (
+            <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>Create a match first — side games attach to a specific round</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {matches.map(m=>(
+                <button key={m.id} onClick={()=>{setMatchId(m.id);setSide1([]);setSide2([]);setPool([]);}}
+                  style={{width:"100%",textAlign:"left",background:matchId===m.id?C.mist:C.smoke,
+                    border:`1.5px solid ${matchId===m.id?C.forest:C.light}`,borderRadius:10,
+                    padding:"10px 13px",cursor:"pointer"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{m.p1} vs {m.p2}</div>
+                  <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{m.format} {m.course_name?`· ${m.course_name}`:""}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Game type picker */}
         <div style={{display:"flex",gap:8}}>
@@ -3307,7 +3335,7 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
   // ── Custom side games (independent of match pairings) ──
   const customGameResults = (sideGames||[]).map(g=>{
     if(g.type==="nassau"){
-      const result = deriveNassauForGroup(matches, g.side1Keys, g.side2Keys, g.betAmount);
+      const result = deriveNassauForGroup(matches, g.side1Keys, g.side2Keys, g.betAmount, g.matchId);
       [["front",result.front],["back",result.back],["overall",result.overall]].forEach(([,seg])=>{
         if(seg.winner==="tie"||seg.winner==="none"||seg.amt===0) return;
         const winKeys = seg.winner==="side1" ? g.side1Keys : g.side2Keys;
@@ -3317,7 +3345,7 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
       });
       return {...g, result};
     } else {
-      const result = deriveSkinsForGroup(matches, g.poolKeys, g.betAmount);
+      const result = deriveSkinsForGroup(matches, g.poolKeys, g.betAmount, g.matchId);
       Object.entries(result.skinsByPlayer).forEach(([key,count])=>{
         addMoney(key, count*g.betAmount);
       });
@@ -3382,7 +3410,10 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
                   <span style={{fontSize:18}}>{g.type==="nassau"?"💵":"🏆"}</span>
                   <div>
                     <div style={{fontSize:14,fontWeight:700,color:C.charcoal}}>{g.name||(g.type==="nassau"?"Custom Nassau":"Custom Skins")}</div>
-                    <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>${g.betAmount} {g.type==="nassau"?"per segment":"per skin"}</div>
+                    <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>
+                      ${g.betAmount} {g.type==="nassau"?"per segment":"per skin"}
+                      {(() => { const m=matches.find(mm=>mm.id===g.matchId); return m ? ` · ${m.p1} vs ${m.p2}` : ""; })()}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5001,6 +5032,7 @@ export default function App(){
   const [editMatch,       setEditMatch]      = useState(null);
   const [tripCourses,     setTripCourses]    = useState([]);
   const [sideGames,       setSideGames]      = useState([]);
+  const [showQuickAdd,    setShowQuickAdd]   = useState(false);
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -5041,7 +5073,7 @@ export default function App(){
       const dbSideGames = await db.get("side_games", `trip_id=eq.${trip.id}&active=eq.true&select=*&order=created_at.asc`);
       if(dbSideGames.length > 0){
         setSideGames(dbSideGames.map(g=>({
-          id: g.id, type: g.type, name: g.name,
+          id: g.id, matchId: g.match_id, type: g.type, name: g.name,
           side1Keys: g.side1_keys||[], side2Keys: g.side2_keys||[],
           poolKeys: g.pool_keys||[], betAmount: parseFloat(g.bet_amount)||10,
         })));
@@ -5170,7 +5202,7 @@ export default function App(){
 
   return(
     <div style={{fontFamily:"Georgia,serif",background:C.cream,minHeight:"100vh",display:"flex",justifyContent:"center",alignItems:"flex-start",padding:"20px 16px 40px"}}>
-      <div style={{width:390,minHeight:844,background:C.white,borderRadius:44,boxShadow:"0 32px 80px rgba(27,67,50,.18)",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+      <div style={{width:390,minHeight:844,background:C.white,borderRadius:44,boxShadow:"0 32px 80px rgba(27,67,50,.18)",overflow:"hidden",display:"flex",flexDirection:"column",position:"relative"}}>
         <div style={{background:C.forest,padding:"14px 24px 10px",display:"flex",justifyContent:"space-between",color:C.white,fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600}}>
           <span>9:41</span><span>●●●</span><span>100%</span>
         </div>
@@ -5202,9 +5234,48 @@ export default function App(){
             {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
             {screen==="payouts"     &&<PayoutsScreen      go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} {...matchProps}/>}
-            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGameCreated={g=>setSideGames(prev=>[...prev,g])}/>}
+            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} onGameCreated={g=>setSideGames(prev=>[...prev,g])}/>}
           </>)}
         </div>
+        {showNav&&!tripLoading&&appReady&&!["creatematch","coursesetup","setup","sidegamesetup","live"].includes(screen)&&(
+          <button onClick={()=>setShowQuickAdd(true)}
+            style={{position:"absolute",right:16,bottom:88,width:56,height:56,borderRadius:"50%",
+              background:`linear-gradient(135deg,${C.forest},${C.fairway})`,border:"none",
+              boxShadow:"0 4px 16px rgba(27,67,50,.35)",color:C.white,fontSize:26,fontWeight:300,
+              cursor:"pointer",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            +
+          </button>
+        )}
+        {showQuickAdd && (
+          <div onClick={()=>setShowQuickAdd(false)}
+            style={{position:"absolute",inset:0,background:"rgba(0,0,0,.4)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{background:C.white,borderRadius:"20px 20px 0 0",padding:"20px 16px 32px",width:"100%",maxWidth:480,display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{width:36,height:4,background:C.light,borderRadius:2,margin:"0 auto 8px"}}/>
+              <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif",marginBottom:4}}>What do you want to add?</div>
+              <button onClick={()=>{setShowQuickAdd(false);setEditMatch(null);setScreen("creatematch");}}
+                style={{display:"flex",alignItems:"center",gap:12,background:C.smoke,border:"none",borderRadius:14,padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
+                <span style={{fontSize:24}}>🏌️</span>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>New Match</div>
+                  <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Set up a round — players, format, course</div>
+                </div>
+              </button>
+              <button onClick={()=>{setShowQuickAdd(false);setScreen("sidegamesetup");}}
+                style={{display:"flex",alignItems:"center",gap:12,background:C.smoke,border:"none",borderRadius:14,padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
+                <span style={{fontSize:24}}>💵</span>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>New Side Game</div>
+                  <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Nassau or Skins for any match</div>
+                </div>
+              </button>
+              <button onClick={()=>setShowQuickAdd(false)}
+                style={{background:"none",border:"none",color:C.gray,fontSize:13,fontFamily:"Arial,sans-serif",padding:"8px",cursor:"pointer"}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {showNav&&!tripLoading&&appReady&&<BottomNav screen={screen} set={setScreen} liveCount={matches.filter(m=>m.status==="live").length}/>}
       </div>
     </div>
