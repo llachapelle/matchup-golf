@@ -370,6 +370,136 @@ function deriveSkinsForGroup(matches, playerKeys, skinAmount=5, scopedMatchId=nu
   return { skinsByPlayer, holes, totalPot, unclaimedCarryover: carryover };
 }
 
+// ── Wolf ──────────────────────────────────────────────────────────────────
+// Players rotate as Wolf each hole (in the order given). Wolf picks the BEST
+// gross score among the others as a "partner" (2v rest) OR goes Lone Wolf
+// (1 vs all 3) if no partner combination beats going alone. Lone Wolf pays/wins
+// double. Settled per hole based on team gross total comparison.
+function deriveWolfForGroup(matches, playerKeys, betAmount=5, scopedMatchId=null) {
+  if(playerKeys.length !== 4) return { holes: [], pointsByPlayer:{}, error:"Wolf requires exactly 4 players" };
+  const pointsByPlayer = {};
+  playerKeys.forEach(k=>pointsByPlayer[k]=0);
+  const holes = [];
+
+  for(let h=1; h<=18; h++){
+    const wolfIdx = (h-1) % 4;
+    const wolfKey = playerKeys[wolfIdx];
+    const others  = playerKeys.filter(k=>k!==wolfKey);
+    const scores  = {};
+    let allHave = true;
+    [wolfKey,...others].forEach(k=>{
+      const s = getPlayerHoleScore(matches,k,h,scopedMatchId);
+      if(s===null) allHave=false;
+      scores[k]=s;
+    });
+    if(!allHave) continue;
+
+    // Try every partner pairing; Wolf picks whichever makes the best team score.
+    // We assume Wolf always picks the partner combo that wins (best-case for Wolf),
+    // since the actual hole-by-hole "who did Wolf pick" isn't separately captured.
+    let bestPartner=null, bestTeamScore=Infinity;
+    others.forEach(partnerKey=>{
+      const teamScore = Math.min(scores[wolfKey], scores[partnerKey]);
+      if(teamScore<bestTeamScore){ bestTeamScore=teamScore; bestPartner=partnerKey; }
+    });
+    const oppKeys = others.filter(k=>k!==bestPartner);
+    const oppBest = Math.min(...oppKeys.map(k=>scores[k]));
+    const loneWolfScore = scores[wolfKey];
+    const loneWolfBeatsAll = Math.min(...others.map(k=>scores[k])) > loneWolfScore;
+
+    let result;
+    if(loneWolfBeatsAll){
+      // Lone Wolf wins solo — double points
+      playerKeys.forEach(k=>{
+        if(k===wolfKey) pointsByPlayer[k]+=betAmount*2*3; // beats all 3 others, double
+        else pointsByPlayer[k]-=betAmount*2;
+      });
+      result={hole:h, wolf:wolfKey, mode:"lone", winner:wolfKey, amount:betAmount*2};
+    } else if(bestTeamScore<oppBest){
+      // Wolf + partner win normal points
+      pointsByPlayer[wolfKey]+=betAmount; pointsByPlayer[bestPartner]+=betAmount;
+      oppKeys.forEach(k=>pointsByPlayer[k]-=betAmount);
+      result={hole:h, wolf:wolfKey, mode:"partner", partner:bestPartner, winner:"wolf_team", amount:betAmount};
+    } else if(oppBest<bestTeamScore){
+      oppKeys.forEach(k=>pointsByPlayer[k]+=betAmount);
+      pointsByPlayer[wolfKey]-=betAmount; pointsByPlayer[bestPartner]-=betAmount;
+      result={hole:h, wolf:wolfKey, mode:"partner", partner:bestPartner, winner:"opponents", amount:betAmount};
+    } else {
+      result={hole:h, wolf:wolfKey, mode:"partner", partner:bestPartner, winner:"tie", amount:0};
+    }
+    holes.push(result);
+  }
+  return { holes, pointsByPlayer };
+}
+
+// ── Stableford ───────────────────────────────────────────────────────────
+// Points per hole based on gross score vs par: double eagle=5, eagle=4,
+// birdie=3, par=2, bogey=1, double bogey or worse=0. Most points wins.
+function deriveStablefordForGroup(matches, playerKeys, pars, betAmount=1, scopedMatchId=null) {
+  const pointsByPlayer = {};
+  playerKeys.forEach(k=>pointsByPlayer[k]=0);
+
+  for(let h=1; h<=18; h++){
+    const par = pars?.[h-1] || 4;
+    playerKeys.forEach(k=>{
+      const score = getPlayerHoleScore(matches,k,h,scopedMatchId);
+      if(score===null) return;
+      const diff = score - par;
+      let pts = 0;
+      if(diff<=-3) pts=5;
+      else if(diff===-2) pts=4;
+      else if(diff===-1) pts=3;
+      else if(diff===0)  pts=2;
+      else if(diff===1)  pts=1;
+      else pts=0;
+      pointsByPlayer[k]+=pts;
+    });
+  }
+  // Rank players by points; winner takes the pot from the rest based on point difference × betAmount
+  const ranked = Object.entries(pointsByPlayer).sort((a,b)=>b[1]-a[1]);
+  const moneyByPlayer = {};
+  playerKeys.forEach(k=>moneyByPlayer[k]=0);
+  if(ranked.length>1){
+    const topScore = ranked[0][1];
+    ranked.forEach(([key,pts])=>{
+      const diff = pts - topScore; // 0 for the leader, negative for everyone else
+      if(diff===0) return;
+      moneyByPlayer[key] += diff*betAmount; // negative
+      moneyByPlayer[ranked[0][0]] -= diff*betAmount; // leader gains the sum
+    });
+  }
+  return { pointsByPlayer, moneyByPlayer, ranked };
+}
+
+// ── Vegas ────────────────────────────────────────────────────────────────
+// 2v2 only. Each team's two gross scores combine into a 2-digit number
+// (lower score = first digit). Lower combined number wins the hole.
+// If a player scores 10+, the digits are added instead of concatenated.
+function deriveVegasForGroup(matches, side1Keys, side2Keys, betAmount=1, scopedMatchId=null) {
+  if(side1Keys.length!==2 || side2Keys.length!==2) return { holes:[], error:"Vegas requires exactly 2 players per side" };
+  const holes = [];
+  let netPoints = 0; // positive = side1 owes nothing, tracks side1's net vs side2
+
+  const combine = (a,b) => {
+    if(a>=10||b>=10) return a+b;
+    const lo=Math.min(a,b), hi=Math.max(a,b);
+    return lo*10+hi;
+  };
+
+  for(let h=1; h<=18; h++){
+    const s1 = side1Keys.map(k=>getPlayerHoleScore(matches,k,h,scopedMatchId));
+    const s2 = side2Keys.map(k=>getPlayerHoleScore(matches,k,h,scopedMatchId));
+    if(s1.some(v=>v===null) || s2.some(v=>v===null)) continue;
+    const num1 = combine(s1[0],s1[1]);
+    const num2 = combine(s2[0],s2[1]);
+    const diff = (num2 - num1) * betAmount; // positive = side1 wins this much
+    netPoints += diff;
+    holes.push({hole:h, side1Num:num1, side2Num:num2, diff});
+  }
+  const winner = netPoints>0 ? "side1" : netPoints<0 ? "side2" : "tie";
+  return { holes, netPoints: Math.abs(netPoints), winner };
+}
+
 // Legacy whole-trip versions (used as the "quick setup" default — Nassau/Skins
 // across everyone in their existing match pairings, with no custom groups created yet)
 function deriveNassauResults(matches, betAmount=10) {
@@ -3094,7 +3224,7 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
 // pool independent of the official match pairings.
 function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreated}){
   const [gameType,  setGameType]  = useState("nassau"); // 'nassau' | 'skins'
-  const [matchId,   setMatchId]   = useState(matches?.[0]?.id || null); // which round/match this game is scoped to
+  const [roundFilter, setRoundFilter] = useState("all"); // "all" or a specific match id — just for narrowing the score lookup
   const [side1,     setSide1]     = useState([]);
   const [side2,     setSide2]     = useState([]);
   const [pool,      setPool]      = useState([]);
@@ -3103,24 +3233,38 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState("");
 
-  // Only players in the SELECTED match are eligible — keeps side games scoped to one round
-  const selectedMatch = matches?.find(m=>m.id===matchId);
-  const eligibleKeys = selectedMatch ? [...(selectedMatch.p1Keys||[]),...(selectedMatch.p2Keys||[])] : [];
-  const displayPlayers = (tripPlayers.length > 0
+  // Any player on the trip is eligible — they don't need to be in the same match.
+  // This lets you bet against a buddy who's in a totally different group.
+  const displayPlayers = tripPlayers.length > 0
     ? tripPlayers.map(p=>({key:p.name.toLowerCase(), name:p.name, team:p.team}))
-    : RAW.map(p=>({key:p.key, name:p.name, team:p.team}))
-  ).filter(p => eligibleKeys.length===0 || eligibleKeys.includes(p.key));
-
-  const toggleInList = (key, list, setList, otherList) => {
-    if(list.includes(key)) setList(list.filter(k=>k!==key));
-    else { setList([...list,key]); if(otherList) setList; }
-  };
+    : RAW.map(p=>({key:p.key, name:p.name, team:p.team}));
 
   const togglePlayer = (key, side) => {
-    if(gameType==="skins"){
+    if(gameType==="skins" || gameType==="stableford"){
       setPool(prev => prev.includes(key) ? prev.filter(k=>k!==key) : [...prev,key]);
       return;
     }
+    if(gameType==="wolf"){
+      // Ordered list, max 4 — order matters for wolf rotation
+      setPool(prev => {
+        if(prev.includes(key)) return prev.filter(k=>k!==key);
+        if(prev.length>=4) return prev; // already full
+        return [...prev,key];
+      });
+      return;
+    }
+    if(gameType==="vegas"){
+      // Two sides, max 2 players each
+      if(side===1){
+        setSide1(prev => prev.includes(key) ? prev.filter(k=>k!==key) : (prev.length>=2 ? prev : [...prev,key]));
+        setSide2(prev => prev.filter(k=>k!==key));
+      } else {
+        setSide2(prev => prev.includes(key) ? prev.filter(k=>k!==key) : (prev.length>=2 ? prev : [...prev,key]));
+        setSide1(prev => prev.filter(k=>k!==key));
+      }
+      return;
+    }
+    // Nassau: any size per side
     if(side===1){
       setSide1(prev => prev.includes(key) ? prev.filter(k=>k!==key) : [...prev,key]);
       setSide2(prev => prev.filter(k=>k!==key)); // remove from other side if present
@@ -3130,29 +3274,37 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
     }
   };
 
-  const canSave = !!matchId && (gameType==="nassau"
-    ? side1.length>0 && side2.length>0
-    : pool.length>=2);
+  const canSave =
+    gameType==="nassau"     ? side1.length>0 && side2.length>0 :
+    gameType==="vegas"      ? side1.length===2 && side2.length===2 :
+    gameType==="wolf"       ? pool.length===4 :
+    /* skins/stableford */    pool.length>=2;
+
+  const errorMsg = () => {
+    if(gameType==="nassau")     return "Pick at least one player per side";
+    if(gameType==="vegas")      return "Vegas needs exactly 2 players per side";
+    if(gameType==="wolf")       return "Wolf needs exactly 4 players";
+    return "Pick at least 2 players";
+  };
 
   const saveGame = async () => {
-    if(!matchId){ setError("Pick a round first"); return; }
-    if(!canSave){ setError(gameType==="nassau" ? "Pick at least one player per side" : "Pick at least 2 players"); return; }
+    if(!canSave){ setError(errorMsg()); return; }
     setSaving(true); setError("");
     try {
       const payload = {
         trip_id:    activeTrip?.id || null,
-        match_id:   matchId,
+        match_id:   roundFilter==="all" ? null : roundFilter, // null = pull scores from any round the player has
         type:       gameType,
         name:       gameName.trim() || null,
-        side1_keys: gameType==="nassau" ? side1 : null,
-        side2_keys: gameType==="nassau" ? side2 : null,
-        pool_keys:  gameType==="skins"  ? pool  : null,
+        side1_keys: (gameType==="nassau"||gameType==="vegas") ? side1 : null,
+        side2_keys: (gameType==="nassau"||gameType==="vegas") ? side2 : null,
+        pool_keys:  (gameType==="skins"||gameType==="stableford"||gameType==="wolf") ? pool : null,
         bet_amount: betAmount,
         active:     true,
       };
       const [saved] = await db.post("side_games", payload);
       onGameCreated && onGameCreated({
-        id: saved?.id || Date.now(), matchId,
+        id: saved?.id || Date.now(), matchId: roundFilter==="all" ? null : roundFilter,
         type: gameType, name: gameName.trim()||null,
         side1Keys: side1, side2Keys: side2, poolKeys: pool, betAmount,
       });
@@ -3174,37 +3326,48 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
       <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif"}}>{error}</div>}
 
-        {/* Round / match scoping — REQUIRED so the game doesn't pull scores from the whole trip */}
-        <div style={card()}>
-          <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:8}}>Which round?</div>
-          {(!matches || matches.length===0) ? (
-            <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>Create a match first — side games attach to a specific round</div>
-          ) : (
+        {/* Round filter — OPTIONAL. Defaults to "any round" so you can bet against
+            someone in a totally different match/group. Narrow it only if you want
+            this game to count just one specific round's scores. */}
+        {matches && matches.length>0 && (
+          <div style={card()}>
+            <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>Which round? (optional)</div>
+            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:8}}>Leave on "Any round" to bet against players in different matches.</div>
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              <button onClick={()=>setRoundFilter("all")}
+                style={{width:"100%",textAlign:"left",background:roundFilter==="all"?C.greenBg:C.smoke,
+                  border:`1.5px solid ${roundFilter==="all"?C.green:C.light}`,borderRadius:10,
+                  padding:"10px 13px",cursor:"pointer"}}>
+                <div style={{fontSize:13,fontWeight:700,color:roundFilter==="all"?C.green:C.charcoal,fontFamily:"Arial,sans-serif"}}>Any round</div>
+                <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Works across any match each player is in</div>
+              </button>
               {matches.map(m=>(
-                <button key={m.id} onClick={()=>{setMatchId(m.id);setSide1([]);setSide2([]);setPool([]);}}
-                  style={{width:"100%",textAlign:"left",background:matchId===m.id?C.mist:C.smoke,
-                    border:`1.5px solid ${matchId===m.id?C.forest:C.light}`,borderRadius:10,
+                <button key={m.id} onClick={()=>setRoundFilter(m.id)}
+                  style={{width:"100%",textAlign:"left",background:roundFilter===m.id?C.mist:C.smoke,
+                    border:`1.5px solid ${roundFilter===m.id?C.forest:C.light}`,borderRadius:10,
                     padding:"10px 13px",cursor:"pointer"}}>
                   <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{m.p1} vs {m.p2}</div>
                   <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{m.format} {m.course_name?`· ${m.course_name}`:""}</div>
                 </button>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Game type picker */}
-        <div style={{display:"flex",gap:8}}>
-          {[["nassau","💵 Nassau"],["skins","🏆 Skins"]].map(([id,label])=>(
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {[["nassau","💵 Nassau"],["skins","🏆 Skins"],["wolf","🐺 Wolf"],["stableford","📊 Stableford"],["vegas","🎰 Vegas"]].map(([id,label])=>(
             <button key={id} onClick={()=>{setGameType(id);setSide1([]);setSide2([]);setPool([]);}}
-              style={{flex:1,background:gameType===id?C.forest:C.white,color:gameType===id?C.white:C.charcoal,
-                border:`1.5px solid ${gameType===id?C.forest:C.light}`,borderRadius:12,padding:"12px",
-                fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+              style={{flex:"1 1 30%",minWidth:100,background:gameType===id?C.forest:C.white,color:gameType===id?C.white:C.charcoal,
+                border:`1.5px solid ${gameType===id?C.forest:C.light}`,borderRadius:12,padding:"10px 6px",
+                fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
               {label}
             </button>
           ))}
         </div>
+        {gameType==="wolf"&&<div style={{...card({background:C.mist})}}><div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif"}}>🐺 Wolf needs exactly 4 players in rotation order. Pick them below.</div></div>}
+        {gameType==="vegas"&&<div style={{...card({background:C.mist})}}><div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif"}}>🎰 Vegas is 2v2 only — exactly 2 players per side.</div></div>}
+        {gameType==="stableford"&&<div style={{...card({background:C.mist})}}><div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif"}}>📊 Stableford ranks any size group by points; leader collects from the field.</div></div>}
 
         {/* Optional name */}
         <div style={card()}>
@@ -3223,17 +3386,20 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
         </div>
 
         {/* Player selection */}
-        {gameType==="nassau" ? (
+        {(gameType==="nassau"||gameType==="vegas") ? (
           <div style={{display:"flex",gap:10}}>
             {[1,2].map(sideNum=>{
               const list = sideNum===1?side1:side2;
               const otherList = sideNum===1?side2:side1;
+              const maxReached = gameType==="vegas" && list.length>=2;
               return(
                 <div key={sideNum} style={{flex:1,background:C.white,borderRadius:14,padding:12,boxShadow:"0 2px 8px rgba(0,0,0,.05)"}}>
-                  <div style={{fontSize:12,fontWeight:700,color:sideNum===1?C.red:C.blue,fontFamily:"Arial,sans-serif",marginBottom:8,textTransform:"uppercase"}}>Side {sideNum}</div>
+                  <div style={{fontSize:12,fontWeight:700,color:sideNum===1?C.red:C.blue,fontFamily:"Arial,sans-serif",marginBottom:8,textTransform:"uppercase"}}>
+                    Side {sideNum}{gameType==="vegas"?" (2)":""}
+                  </div>
                   {displayPlayers.map(p=>{
                     const selected = list.includes(p.key);
-                    const disabled = otherList.includes(p.key);
+                    const disabled = otherList.includes(p.key) || (maxReached && !selected);
                     return(
                       <button key={p.key} disabled={disabled} onClick={()=>togglePlayer(p.key,sideNum)}
                         style={{width:"100%",textAlign:"left",background:selected?(sideNum===1?C.redBg:C.blueBg):C.smoke,
@@ -3251,16 +3417,22 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
           </div>
         ) : (
           <div style={card()}>
-            <div style={{fontSize:12,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif",marginBottom:8}}>Who's in the skins pool?</div>
+            <div style={{fontSize:12,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif",marginBottom:8}}>
+              {gameType==="skins"?"Who's in the skins pool?":gameType==="stableford"?"Who's competing?":"Pick 4 players (rotation order)"}
+            </div>
             {displayPlayers.map(p=>{
               const selected = pool.includes(p.key);
+              const wolfOrder = gameType==="wolf" && selected ? pool.indexOf(p.key)+1 : null;
+              const disabled = gameType==="wolf" && pool.length>=4 && !selected;
               return(
-                <button key={p.key} onClick={()=>togglePlayer(p.key)}
+                <button key={p.key} disabled={disabled} onClick={()=>togglePlayer(p.key)}
                   style={{width:"100%",textAlign:"left",background:selected?C.greenBg:C.smoke,
                     border:`1.5px solid ${selected?C.green:C.light}`,borderRadius:8,
                     padding:"9px 12px",fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:selected?700:500,
-                    color:C.charcoal,marginBottom:5,cursor:"pointer"}}>
-                  {selected?"✓ ":""}{p.name}
+                    color:disabled?C.light:C.charcoal,marginBottom:5,cursor:disabled?"not-allowed":"pointer",
+                    opacity:disabled?0.4:1,display:"flex",justifyContent:"space-between"}}>
+                  <span>{selected?"✓ ":""}{p.name}</span>
+                  {wolfOrder&&<span style={{fontSize:11,color:C.green}}>Hole {wolfOrder}, {wolfOrder+4}, {wolfOrder+8}, {wolfOrder+12}...</span>}
                 </button>
               );
             })}
@@ -3272,6 +3444,27 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
           <div style={{...card({background:C.mist})}}>
             <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
               {side1.map(nameFor).join(" & ")} <strong>vs</strong> {side2.map(nameFor).join(" & ")} · ${betAmount}/segment
+            </div>
+          </div>
+        )}
+        {gameType==="vegas" && side1.length===2 && side2.length===2 && (
+          <div style={{...card({background:C.mist})}}>
+            <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+              {side1.map(nameFor).join(" & ")} <strong>vs</strong> {side2.map(nameFor).join(" & ")} · ${betAmount}/point
+            </div>
+          </div>
+        )}
+        {gameType==="wolf" && pool.length===4 && (
+          <div style={{...card({background:C.mist})}}>
+            <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+              Wolf rotation: {pool.map(nameFor).join(" → ")} · ${betAmount}/hole
+            </div>
+          </div>
+        )}
+        {gameType==="stableford" && pool.length>0 && (
+          <div style={{...card({background:C.mist})}}>
+            <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+              {pool.length} players · ${betAmount}/point difference from leader
             </div>
           </div>
         )}
@@ -3344,13 +3537,41 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
         loseKeys.forEach(k=>addMoney(k, -seg.amt));
       });
       return {...g, result};
-    } else {
+    } else if(g.type==="skins"){
       const result = deriveSkinsForGroup(matches, g.poolKeys, g.betAmount, g.matchId);
       Object.entries(result.skinsByPlayer).forEach(([key,count])=>{
         addMoney(key, count*g.betAmount);
       });
       return {...g, result};
+    } else if(g.type==="wolf"){
+      const result = deriveWolfForGroup(matches, g.poolKeys, g.betAmount, g.matchId);
+      Object.entries(result.pointsByPlayer||{}).forEach(([key,pts])=>addMoney(key, pts));
+      return {...g, result};
+    } else if(g.type==="stableford"){
+      // Use the scoped match's par layout if available, else Mammoth Dunes fallback
+      const scopedMatch = g.matchId ? matches.find(m=>m.id===g.matchId) : null;
+      let pars = COURSES.mammoth.pars;
+      if(scopedMatch?.hole_data){
+        try {
+          const parsed = typeof scopedMatch.hole_data==="string" ? JSON.parse(scopedMatch.hole_data) : scopedMatch.hole_data;
+          if(Array.isArray(parsed)&&parsed.length===18) pars = parsed.map(h=>h.par);
+        } catch(e){}
+      }
+      const result = deriveStablefordForGroup(matches, g.poolKeys, pars, g.betAmount, g.matchId);
+      Object.entries(result.moneyByPlayer||{}).forEach(([key,amt])=>addMoney(key, amt));
+      return {...g, result};
+    } else if(g.type==="vegas"){
+      const result = deriveVegasForGroup(matches, g.side1Keys, g.side2Keys, g.betAmount, g.matchId);
+      if(result.winner==="side1"){
+        g.side1Keys.forEach(k=>addMoney(k, result.netPoints/g.side1Keys.length));
+        g.side2Keys.forEach(k=>addMoney(k, -result.netPoints/g.side2Keys.length));
+      } else if(result.winner==="side2"){
+        g.side2Keys.forEach(k=>addMoney(k, result.netPoints/g.side2Keys.length));
+        g.side1Keys.forEach(k=>addMoney(k, -result.netPoints/g.side1Keys.length));
+      }
+      return {...g, result};
     }
+    return g;
   });
 
   const allPlayerKeys = Object.keys(playerRecords);
@@ -3403,21 +3624,26 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
           </button>
 
           {/* Custom games created by the organizer */}
-          {customGameResults.length>0 && customGameResults.map(g=>(
+          {customGameResults.length>0 && customGameResults.map(g=>{
+            const ICONS = {nassau:"💵",skins:"🏆",wolf:"🐺",stableford:"📊",vegas:"🎰"};
+            const LABELS = {nassau:"Custom Nassau",skins:"Custom Skins",wolf:"Wolf",stableford:"Stableford",vegas:"Vegas"};
+            const UNIT = {nassau:"per segment",skins:"per skin",wolf:"per hole",stableford:"per point",vegas:"per point"};
+            return(
             <div key={g.id} style={card()}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:18}}>{g.type==="nassau"?"💵":"🏆"}</span>
+                  <span style={{fontSize:18}}>{ICONS[g.type]}</span>
                   <div>
-                    <div style={{fontSize:14,fontWeight:700,color:C.charcoal}}>{g.name||(g.type==="nassau"?"Custom Nassau":"Custom Skins")}</div>
+                    <div style={{fontSize:14,fontWeight:700,color:C.charcoal}}>{g.name||LABELS[g.type]}</div>
                     <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>
-                      ${g.betAmount} {g.type==="nassau"?"per segment":"per skin"}
-                      {(() => { const m=matches.find(mm=>mm.id===g.matchId); return m ? ` · ${m.p1} vs ${m.p2}` : ""; })()}
+                      ${g.betAmount} {UNIT[g.type]}
+                      {(() => { const m=matches.find(mm=>mm.id===g.matchId); return m ? ` · ${m.p1} vs ${m.p2}` : g.matchId ? "" : " · any round"; })()}
                     </div>
                   </div>
                 </div>
               </div>
-              {g.type==="nassau" ? (
+
+              {g.type==="nassau" && (
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   <div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:4}}>
                     {g.side1Keys.map(nameForKey).join(" & ")} <strong>vs</strong> {g.side2Keys.map(nameForKey).join(" & ")}
@@ -3434,7 +3660,9 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
                     ))}
                   </div>
                 </div>
-              ) : (
+              )}
+
+              {g.type==="skins" && (
                 Object.keys(g.result.skinsByPlayer).length===0
                   ? <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>No skins won yet</div>
                   : Object.entries(g.result.skinsByPlayer).sort((a,b)=>b[1]-a[1]).map(([key,count])=>(
@@ -3444,8 +3672,48 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
                     </div>
                   ))
               )}
+
+              {g.type==="wolf" && (
+                g.result.error
+                  ? <div style={{fontSize:12,color:C.red,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>{g.result.error}</div>
+                  : (g.result.holes||[]).length===0
+                    ? <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>No holes scored yet</div>
+                    : Object.entries(g.result.pointsByPlayer||{}).sort((a,b)=>b[1]-a[1]).map(([key,pts])=>(
+                      <div key={key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.mist}`}}>
+                        <span style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.charcoal}}>{nameForKey(key)}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:pts>=0?C.green:C.red,fontFamily:"Arial,sans-serif"}}>{fmtMoney(pts)}</span>
+                      </div>
+                    ))
+              )}
+
+              {g.type==="stableford" && (
+                (g.result.ranked||[]).length===0
+                  ? <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>No holes scored yet</div>
+                  : g.result.ranked.map(([key,pts],i)=>(
+                    <div key={key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.mist}`}}>
+                      <span style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.charcoal}}>{i===0?"🥇 ":""}{nameForKey(key)}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif"}}>{pts} pts</span>
+                    </div>
+                  ))
+              )}
+
+              {g.type==="vegas" && (
+                g.result.error
+                  ? <div style={{fontSize:12,color:C.red,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>{g.result.error}</div>
+                  : (g.result.holes||[]).length===0
+                    ? <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>No holes scored yet</div>
+                    : (
+                      <div style={{fontSize:13,fontFamily:"Arial,sans-serif",textAlign:"center",padding:6}}>
+                        <span style={{color:C.charcoal}}>{g.side1Keys.map(nameForKey).join(" & ")} <strong>vs</strong> {g.side2Keys.map(nameForKey).join(" & ")}</span>
+                        <div style={{fontWeight:700,color:g.result.winner==="tie"?C.gray:C.green,marginTop:4}}>
+                          {g.result.winner==="tie"?"Tied":`${g.result.winner==="side1"?g.side1Keys.map(nameForKey).join(" & "):g.side2Keys.map(nameForKey).join(" & ")} +$${g.result.netPoints}`}
+                        </div>
+                      </div>
+                    )
+              )}
             </div>
-          ))}
+            );
+          })}
 
           <div style={{display:"flex",alignItems:"center",gap:10,margin:"4px 0"}}>
             <div style={{flex:1,height:1,background:C.light}}/>
