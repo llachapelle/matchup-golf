@@ -2026,6 +2026,11 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
     return out;
   });
 
+  // 20 Ball / 40 Ball: tracks which player keys' scores are "banked" toward
+  // the running total for each hole. Shape: { [hole]: { [playerKey]: true } }
+  // Seeded from match.bankedScores if previously saved.
+  const [bankedScores, setBankedScores] = useState(()=>match.bankedScores || {});
+
   const si  = course.strokeIndex[holeNum-1];
   const par = course.pars[holeNum-1];
 
@@ -2036,12 +2041,58 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
   const isScramble   = format.toLowerCase().includes("scramble");
   const isAltShot    = format.toLowerCase().includes("alt")&&!isScramble;
   const isTeamScoreFormat = isScramble || isAltShot; // both use one score per team
+  const isXBall      = format.toLowerCase().includes("ball")&&(format.toLowerCase().includes("20")||format.toLowerCase().includes("40"));
+  const xBallTarget  = format.toLowerCase().includes("40") ? 40 : 20; // total banked scores needed by hole 18
+  const xBallPerSide = format.toLowerCase().includes("40") ? 4 : 2;   // players per side contributing scores
+
+  // Toggle whether a given player's score on the CURRENT hole counts toward their side's total
+  const toggleBank = (key) => {
+    setBankedScores(prev => {
+      const cur = {...(prev[holeNum]||{})};
+      if(cur[key]) delete cur[key]; else cur[key] = true;
+      return {...prev, [holeNum]: cur};
+    });
+  };
+
+  // Count how many scores have been banked so far for a given side (across all holes up to current)
+  const bankedCountForSide = (sideKeys) => {
+    let count = 0;
+    for(let h=1; h<=18; h++){
+      const banked = bankedScores[h] || {};
+      sideKeys.forEach(k=>{ if(banked[k]) count++; });
+    }
+    return count;
+  };
+
+  // Net total of banked scores for a side (sum of net-vs-par for every banked score)
+  const bankedNetTotalForSide = (sideKeys) => {
+    let total = 0;
+    for(let h=1; h<=18; h++){
+      const banked = bankedScores[h] || {};
+      const scores = holeScores[h] || {};
+      const hSI = course.strokeIndex[h-1];
+      const hPar = course.pars[h-1];
+      sideKeys.forEach(k=>{
+        if(banked[k]){
+          const gross = parseInt(scores[k]);
+          if(!isNaN(gross) && gross>0){
+            const net = getNetLive(k, scores, h);
+            total += (net - hPar);
+          }
+        }
+      });
+    }
+    return total;
+  };
 
   // allEntered: scramble only needs one side's score; alt-shot/match play needs both
   const p1AllKeys = [...(match.p1Keys||[]), ...p1ExtPlayers.map(p=>p.key)];
   const p2AllKeys = [...(match.p2Keys||[]), ...p2ExtPlayers.map(p=>p.key)];
 
-  const allEntered = isScramble
+  const allEntered = isXBall
+    // X-Ball (20/40 Ball): can always advance — banking 0, 1, or both scores is a valid choice each hole
+    ? true
+    : isScramble
     // Scramble: just need the current player's team score to advance
     ? (parseInt(curScores["team_p1"])>0 || parseInt(curScores["team_p2"])>0)
     : isAltShot
@@ -2112,6 +2163,21 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
     const p1Col=p1Team==="red"?C.sand:"#85C1E9";
     const p2Col=p2Team==="red"?C.sand:"#85C1E9";
 
+    // X-Ball (20/40 Ball): show banked progress and net totals per side
+    if(isXBall){
+      const p1Keys=[...(match.p1Keys||[]),...p1ExtPlayers.map(p=>p.key)];
+      const p2Keys=[...(match.p2Keys||[]),...p2ExtPlayers.map(p=>p.key)];
+      const p1Banked=bankedCountForSide(p1Keys), p2Banked=bankedCountForSide(p2Keys);
+      const p1Net=bankedNetTotalForSide(p1Keys), p2Net=bankedNetTotalForSide(p2Keys);
+      if(p1Banked===0&&p2Banked===0) return {text:"Not started", color:"rgba(255,255,255,.8)"};
+      if(p1Banked>=xBallTarget&&p2Banked>=xBallTarget){
+        if(p1Net<p2Net) return {text:`${match.p1} wins (${p1Net} vs ${p2Net})`, color:p1Col};
+        if(p2Net<p1Net) return {text:`${match.p2} wins (${p2Net} vs ${p1Net})`, color:p2Col};
+        return {text:`Tied (${p1Net} each)`, color:"rgba(255,255,255,.8)"};
+      }
+      return {text:`${match.p1.split(" / ")[0]}: ${p1Banked}/${xBallTarget} · ${match.p2.split(" / ")[0]}: ${p2Banked}/${xBallTarget}`, color:"rgba(255,255,255,.85)"};
+    }
+
     // Scramble: stroke play — show running totals
     if(isScramble){
       let t1=0,t2=0,h1=0,h2=0;
@@ -2181,10 +2247,11 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
 
     const newStatus = computeStatusFromResults(newResults);
     updateMatch(match.id, {
-      thru:       holeNum,
-      liveScore:  newStatus.text,
-      holeScores: newHoleScores,
-      status:     "live",
+      thru:         holeNum,
+      liveScore:    newStatus.text,
+      holeScores:   newHoleScores,
+      bankedScores: bankedScores,
+      status:       "live",
     });
 
     // Save to Supabase
@@ -2205,6 +2272,7 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
         }
         await db.patch("matches",`id=eq.${match.id}`,{
           thru:holeNum, live_score:newStatus.text, status:"live",
+          banked_scores: isXBall ? JSON.stringify(bankedScores) : undefined,
         });
       } catch(e){console.warn("Failed to save hole:",e.message);}
     }
@@ -2311,7 +2379,13 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
           </div>
           <button onClick={async ()=>{
             let ws, scoreStr;
-            if(isScramble){
+            if(isXBall){
+              const p1Keys=[...(match.p1Keys||[]),...p1ExtPlayers.map(p=>p.key)];
+              const p2Keys=[...(match.p2Keys||[]),...p2ExtPlayers.map(p=>p.key)];
+              const p1Net=bankedNetTotalForSide(p1Keys), p2Net=bankedNetTotalForSide(p2Keys);
+              ws=p1Net<p2Net?"p1":p2Net<p1Net?"p2":"halve";
+              scoreStr=ws==="halve"?`Tied (${p1Net})`:`${ws==="p1"?match.p1:match.p2} wins (${Math.min(p1Net,p2Net)} vs ${Math.max(p1Net,p2Net)})`;
+            } else if(isScramble){
               // Scramble: count total strokes per team
               let t1=0,t2=0;
               for(let h=1;h<=18;h++){
@@ -2493,6 +2567,7 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                     const isExt=p.isExternal,grossVal=curScores[p.key]??"",gross=parseInt(grossVal);
                     const strks=!isExt&&!isNaN(gross)&&gross>0?sOnHole(p.ms,si):0;
                     const netVal=!isNaN(gross)&&gross>0?(isExt?getNetLive(p.key,curScores,holeNum):gross-sOnHole(p.ms,si)):null;
+                    const isBanked=(bankedScores[holeNum]||{})[p.key];
                     return(
                       <div key={p.key}>
                         <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2503,10 +2578,17 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                             </div>
                             <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{isExt?`HCP ${p.index||"?"}`:`HCP ${p.index} · tap for details`}</div>
                           </div>
-                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
                             {netVal!==null&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{showNet?"Net":"→Net"}</div><div style={{fontSize:18,fontWeight:700,color:C.forest}}>{showNet?netVal:gross}</div>{!showNet&&<div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>net {netVal}</div>}</div>}
                             <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(p.key,e.target.value)} placeholder="—"
                               style={{width:52,height:44,border:`2px solid ${grossVal?C.forest:C.light}`,borderRadius:12,textAlign:"center",fontSize:20,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
+                            {isXBall&&!isExt&&grossVal&&(
+                              <button onClick={()=>toggleBank(p.key)}
+                                style={{width:36,height:36,borderRadius:10,border:`2px solid ${isBanked?C.forest:C.light}`,
+                                  background:isBanked?C.forest:C.white,color:isBanked?C.white:C.gray,fontSize:16,cursor:"pointer",flexShrink:0,fontWeight:700}}>
+                                {isBanked?"✓":"+"}
+                              </button>
+                            )}
                           </div>
                         </div>
                         {!isExt&&expandHcp===p.key&&<div style={{background:C.mist,padding:"10px 16px",fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,borderTop:`1px solid ${C.light}`}}><div>HCP Index: <strong>{p.index}</strong></div><div>Course HCP: <strong>{p.ch}</strong></div><div>Playing HCP: <strong>{p.ph}</strong></div><div>Match strokes: <strong>{p.ms>0?`+${p.ms}`:0}</strong></div><div>Strokes this hole (SI {si}): <strong>{strks>0?`+${strks}`:"None"}</strong></div></div>}
@@ -2520,6 +2602,7 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                     const isExt=p.isExternal,grossVal=curScores[p.key]??"",gross=parseInt(grossVal);
                     const strks=!isExt&&!isNaN(gross)&&gross>0?sOnHole(p.ms,si):0;
                     const netVal=!isNaN(gross)&&gross>0?(isExt?getNetLive(p.key,curScores,holeNum):gross-sOnHole(p.ms,si)):null;
+                    const isBanked=(bankedScores[holeNum]||{})[p.key];
                     return(
                       <div key={p.key}>
                         <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2530,10 +2613,17 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                             </div>
                             <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{isExt?`HCP ${p.index||"?"}`:`HCP ${p.index} · tap for details`}</div>
                           </div>
-                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
                             {netVal!==null&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>{showNet?"Net":"→Net"}</div><div style={{fontSize:18,fontWeight:700,color:C.forest}}>{showNet?netVal:gross}</div>{!showNet&&<div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>net {netVal}</div>}</div>}
                             <input type="number" min="1" max="15" value={grossVal} onChange={e=>setScore(p.key,e.target.value)} placeholder="—"
                               style={{width:52,height:44,border:`2px solid ${grossVal?C.forest:C.light}`,borderRadius:12,textAlign:"center",fontSize:20,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:grossVal?C.mist:C.smoke}}/>
+                            {isXBall&&!isExt&&grossVal&&(
+                              <button onClick={()=>toggleBank(p.key)}
+                                style={{width:36,height:36,borderRadius:10,border:`2px solid ${isBanked?C.forest:C.light}`,
+                                  background:isBanked?C.forest:C.white,color:isBanked?C.white:C.gray,fontSize:16,cursor:"pointer",flexShrink:0,fontWeight:700}}>
+                                {isBanked?"✓":"+"}
+                              </button>
+                            )}
                           </div>
                         </div>
                         {!isExt&&expandHcp===p.key&&<div style={{background:C.mist,padding:"10px 16px",fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,borderTop:`1px solid ${C.light}`}}><div>HCP Index: <strong>{p.index}</strong></div><div>Course HCP: <strong>{p.ch}</strong></div><div>Playing HCP: <strong>{p.ph}</strong></div><div>Match strokes: <strong>{p.ms>0?`+${p.ms}`:0}</strong></div><div>Strokes this hole (SI {si}): <strong>{strks>0?`+${strks}`:"None"}</strong></div></div>}
@@ -2541,11 +2631,31 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                     );
                   })}
                 </div>
+
+                {/* X-Ball running totals — 20 Ball / 40 Ball banking progress */}
+                {isXBall&&(
+                  <div style={{display:"flex",gap:10}}>
+                    {[{label:match.p1,team:p1Team,keys:[...(match.p1Keys||[]),...p1ExtPlayers.map(p=>p.key)]},
+                      {label:match.p2,team:p2Team,keys:[...(match.p2Keys||[]),...p2ExtPlayers.map(p=>p.key)]}].map(side=>{
+                      const bankedCount=bankedCountForSide(side.keys);
+                      const netTotal=bankedNetTotalForSide(side.keys);
+                      const tc=side.team==="red"?C.red:C.blue;
+                      return(
+                        <div key={side.label} style={{flex:1,background:C.mist,borderRadius:12,padding:"10px 12px",textAlign:"center"}}>
+                          <div style={{fontSize:11,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif"}}>{side.label}</div>
+                          <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{bankedCount}/{xBallTarget}</div>
+                          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>banked · net {netTotal>0?`+${netTotal}`:netTotal}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             )}
 
+
             {/* Hole result preview — match play only */}
-            {!isScramble && preview&&(()=>{
+            {!isScramble && !isXBall && preview&&(()=>{
               const col=preview==="p1"?(p1Team==="red"?C.red:C.blue):preview==="p2"?(p2Team==="red"?C.red:C.blue):C.slate;
               const txt=preview==="p1"?`${match.p1} wins hole`:preview==="p2"?`${match.p2} wins hole`:"Hole tied";
               const bg2=preview==="p1"?(p1Team==="red"?C.redBg:C.blueBg):preview==="p2"?(p2Team==="red"?C.redBg:C.blueBg):C.mist;
@@ -2557,7 +2667,7 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
                 boxShadow:allEntered?"0 6px 20px rgba(27,67,50,.25)":"none",
                 cursor:allEntered?"pointer":"not-allowed"}}>
               {allEntered
-                ? (isScramble ? `Submit My Team's Score →` : `Submit Hole ${holeNum} →`)
+                ? (isXBall ? `Next Hole →` : isScramble ? `Submit My Team's Score →` : `Submit Hole ${holeNum} →`)
                 : (isScramble ? "Enter your team's score" : "Enter at least one score per side")}
             </button>
           </>
@@ -3222,15 +3332,18 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
 // ─── SIDE GAME SETUP SCREEN ───────────────────────────────────────────────────
 // Lets the organizer create a fully custom Nassau (1v1, 2v2, etc.) or Skins
 // pool independent of the official match pairings.
-function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreated}){
-  const [gameType,  setGameType]  = useState("nassau"); // 'nassau' | 'skins'
-  const [roundFilter, setRoundFilter] = useState("all"); // "all" or a specific match id — just for narrowing the score lookup
-  const [side1,     setSide1]     = useState([]);
-  const [side2,     setSide2]     = useState([]);
-  const [pool,      setPool]      = useState([]);
-  const [betAmount, setBetAmount] = useState(10);
-  const [gameName,  setGameName]  = useState("");
+function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, editGame, onGameCreated, onGameUpdated, onGameDeleted}){
+  const isEdit = !!editGame;
+  const [gameType,  setGameType]  = useState(editGame?.type || "nassau");
+  const [roundFilter, setRoundFilter] = useState(editGame ? (editGame.matchId || "all") : "all");
+  const [side1,     setSide1]     = useState(editGame?.side1Keys || []);
+  const [side2,     setSide2]     = useState(editGame?.side2Keys || []);
+  const [pool,      setPool]      = useState(editGame?.poolKeys || []);
+  const [betAmount, setBetAmount] = useState(editGame?.betAmount || 10);
+  const [gameName,  setGameName]  = useState(editGame?.name || "");
   const [saving,    setSaving]    = useState(false);
+  const [deleting,  setDeleting]  = useState(false);
+  const [confirmDel,setConfirmDel]= useState(false);
   const [error,     setError]     = useState("");
 
   // Any player on the trip is eligible — they don't need to be in the same match.
@@ -3302,15 +3415,36 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
         bet_amount: betAmount,
         active:     true,
       };
-      const [saved] = await db.post("side_games", payload);
-      onGameCreated && onGameCreated({
-        id: saved?.id || Date.now(), matchId: roundFilter==="all" ? null : roundFilter,
-        type: gameType, name: gameName.trim()||null,
-        side1Keys: side1, side2Keys: side2, poolKeys: pool, betAmount,
-      });
+      if(isEdit && editGame.id && typeof editGame.id==="string" && editGame.id.length>10){
+        await db.patch("side_games", `id=eq.${editGame.id}`, payload);
+        onGameUpdated && onGameUpdated({
+          id: editGame.id, matchId: roundFilter==="all" ? null : roundFilter,
+          type: gameType, name: gameName.trim()||null,
+          side1Keys: side1, side2Keys: side2, poolKeys: pool, betAmount,
+        });
+      } else {
+        const [saved] = await db.post("side_games", payload);
+        onGameCreated && onGameCreated({
+          id: saved?.id || Date.now(), matchId: roundFilter==="all" ? null : roundFilter,
+          type: gameType, name: gameName.trim()||null,
+          side1Keys: side1, side2Keys: side2, poolKeys: pool, betAmount,
+        });
+      }
       go("payouts");
-    } catch(e){ setError("Failed to create game: "+e.message); }
+    } catch(e){ setError("Failed to save game: "+e.message); }
     setSaving(false);
+  };
+
+  const deleteGame = async () => {
+    setDeleting(true);
+    try {
+      if(editGame?.id && typeof editGame.id==="string" && editGame.id.length>10){
+        await db.patch("side_games", `id=eq.${editGame.id}`, {active:false});
+      }
+      onGameDeleted && onGameDeleted(editGame.id);
+      go("payouts");
+    } catch(e){ setError("Failed to delete: "+e.message); }
+    setDeleting(false);
   };
 
   const nameFor = key => displayPlayers.find(p=>p.key===key)?.name || key;
@@ -3319,7 +3453,7 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"16px 20px 20px"}}>
         <div style={{marginBottom:8}}><BackBtn go={go} to="payouts"/></div>
-        <div style={{color:C.white,fontSize:20,fontWeight:700}}>New Side Game</div>
+        <div style={{color:C.white,fontSize:20,fontWeight:700}}>{isEdit?"Edit Side Game":"New Side Game"}</div>
         <div style={{color:"rgba(255,255,255,.6)",fontSize:13,fontFamily:"Arial,sans-serif"}}>Set up a custom Nassau or Skins game — any players, any size.</div>
       </div>
 
@@ -3479,15 +3613,32 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, onGameCreate
         <button onClick={saveGame} disabled={saving||!canSave}
           style={{...bigBtn(`linear-gradient(135deg,${canSave?C.forest:"#9CA3AF"},${canSave?C.fairway:"#D1D5DB"})`,C.white),
             cursor:canSave?"pointer":"not-allowed"}}>
-          {saving?"Creating…":"Create Side Game →"}
+          {saving?(isEdit?"Saving…":"Creating…"):(isEdit?"Save Changes →":"Create Side Game →")}
         </button>
+
+        {isEdit&&(
+          confirmDel ? (
+            <div style={{...card({background:C.redBg,border:`1.5px solid ${C.red}`})}}>
+              <div style={{fontSize:13,color:C.red,fontFamily:"Arial,sans-serif",fontWeight:700,marginBottom:10,textAlign:"center"}}>Delete this side game?</div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setConfirmDel(false)} style={{...bigBtn(C.white,C.charcoal),flex:1,border:`1.5px solid ${C.light}`}}>Cancel</button>
+                <button onClick={deleteGame} disabled={deleting} style={{...bigBtn(C.red,C.white),flex:1}}>{deleting?"Deleting…":"Delete"}</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={()=>setConfirmDel(true)}
+              style={{background:"none",border:"none",color:C.red,fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,padding:"8px",cursor:"pointer"}}>
+              Delete Side Game
+            </button>
+          )
+        )}
       </div>
     </div>
   );
 }
 
 
-function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip, sideGames}){
+function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip, sideGames, onEditGame}){
   const [tab,        setTab]        = useState("Side Games");
   const [nassauAmt,  setNassauAmt]  = useState(10);
   const [skinsAmt,   setSkinsAmt]   = useState(5);
@@ -3617,7 +3768,7 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
 
         {/* ── SIDE GAMES TAB ── */}
         {tab==="Side Games"&&(<>
-          <button onClick={()=>go("sidegamesetup")}
+          <button onClick={()=>{onEditGame&&onEditGame(null);go("sidegamesetup");}}
             style={{width:"100%",background:`linear-gradient(135deg,${C.forest},${C.fairway})`,border:"none",borderRadius:14,
               padding:"13px",fontSize:14,fontWeight:700,color:C.white,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
             + New Side Game (1v1, 2v2, custom group)
@@ -3641,6 +3792,10 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
                     </div>
                   </div>
                 </div>
+                <button onClick={()=>{onEditGame&&onEditGame(g);go("sidegamesetup");}}
+                  style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                  Edit
+                </button>
               </div>
 
               {g.type==="nassau" && (
@@ -5301,6 +5456,7 @@ export default function App(){
   const [tripCourses,     setTripCourses]    = useState([]);
   const [sideGames,       setSideGames]      = useState([]);
   const [showQuickAdd,    setShowQuickAdd]   = useState(false);
+  const [editSideGame,    setEditSideGame]   = useState(null);
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -5370,7 +5526,8 @@ export default function App(){
           slope:       m.slope       || null,
           rating:      m.rating      || null,
           par:         m.par         || null,
-          hole_data:   m.hole_data   || null,
+          hole_data:    m.hole_data    || null,
+          bankedScores: m.banked_scores ? (typeof m.banked_scores==="string"?JSON.parse(m.banked_scores):m.banked_scores) : {},
           holeScores:  {},
         }));
         setMatches(appMatches);
@@ -5501,8 +5658,11 @@ export default function App(){
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
-            {screen==="payouts"     &&<PayoutsScreen      go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} {...matchProps}/>}
-            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} onGameCreated={g=>setSideGames(prev=>[...prev,g])}/>}
+            {screen==="payouts"     &&<PayoutsScreen      go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} onEditGame={g=>setEditSideGame(g)} {...matchProps}/>}
+            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} editGame={editSideGame}
+              onGameCreated={g=>setSideGames(prev=>[...prev,g])}
+              onGameUpdated={g=>{setSideGames(prev=>prev.map(sg=>sg.id===g.id?g:sg));setEditSideGame(null);}}
+              onGameDeleted={id=>{setSideGames(prev=>prev.filter(sg=>sg.id!==id));setEditSideGame(null);}}/>}
           </>)}
         </div>
         {showNav&&!tripLoading&&appReady&&!["creatematch","coursesetup","setup","sidegamesetup","live"].includes(screen)&&(
@@ -5529,7 +5689,7 @@ export default function App(){
                   <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Set up a round — players, format, course</div>
                 </div>
               </button>
-              <button onClick={()=>{setShowQuickAdd(false);setScreen("sidegamesetup");}}
+              <button onClick={()=>{setShowQuickAdd(false);setEditSideGame(null);setScreen("sidegamesetup");}}
                 style={{display:"flex",alignItems:"center",gap:12,background:C.smoke,border:"none",borderRadius:14,padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
                 <span style={{fontSize:24}}>💵</span>
                 <div>
