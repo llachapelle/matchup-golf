@@ -301,14 +301,76 @@ function derivePlayerRecords(matches) {
 }
 
 // ─── SIDE GAMES ENGINE ──────────────────────────────────────────────────────
-// Computes real Nassau and Skins results from actual hole-by-hole scores
-// entered during live scoring — no more static demo numbers.
-//
-// Nassau: per-match, three bets (front 9 / back 9 / overall) based on
-//   lowest gross score per side per hole (best-ball style comparison).
-// Skins: per-hole across all players who have a score for that hole,
-//   lowest gross score wins the skin; ties carry the pot to the next hole.
+// Computes real Nassau and Skins results from actual hole-by-hole scores.
+// Fully decoupled from match pairings — works off ANY custom grouping of
+// players into two sides (Nassau) or a pool (Skins), e.g. a private 1v1
+// side bet between two guys inside a larger 4-person scramble.
 
+// Helper: find a player's gross score for a given hole across ALL matches
+// they appear in during the trip (a player only appears in one live match
+// at a time, so this just locates which match holds their score for that hole).
+const getPlayerHoleScore = (matches, playerKey, hole) => {
+  for(const m of matches){
+    const hs = m.holeScores?.[hole];
+    if(hs && hs[playerKey]!==undefined){
+      const v = parseInt(hs[playerKey]);
+      if(!isNaN(v) && v>0) return v;
+    }
+  }
+  return null;
+};
+
+// Nassau for a custom group: side1Keys vs side2Keys (1v1, 2v2, etc.)
+function deriveNassauForGroup(matches, side1Keys, side2Keys, betAmount=10) {
+  const segment = (startH, endH) => {
+    let s1Wins=0, s2Wins=0, holesPlayed=0;
+    for(let h=startH; h<=endH; h++){
+      const s1Scores = side1Keys.map(k=>getPlayerHoleScore(matches,k,h)).filter(v=>v!==null);
+      const s2Scores = side2Keys.map(k=>getPlayerHoleScore(matches,k,h)).filter(v=>v!==null);
+      if(s1Scores.length===0 || s2Scores.length===0) continue;
+      holesPlayed++;
+      const s1Best = Math.min(...s1Scores), s2Best = Math.min(...s2Scores);
+      if(s1Best<s2Best) s1Wins++;
+      else if(s2Best<s1Best) s2Wins++;
+    }
+    if(holesPlayed===0) return {winner:"none", amt:0, holesPlayed};
+    if(s1Wins===s2Wins) return {winner:"tie", amt:0, holesPlayed};
+    return {winner: s1Wins>s2Wins?"side1":"side2", amt:betAmount, holesPlayed};
+  };
+  return { front: segment(1,9), back: segment(10,18), overall: segment(1,18) };
+}
+
+// Skins for a custom pool of players (any size, any group)
+function deriveSkinsForGroup(matches, playerKeys, skinAmount=5) {
+  const skinsByPlayer = {};
+  const holes = [];
+  let carryover = 0;
+
+  for(let h=1; h<=18; h++){
+    const scoresThisHole = playerKeys
+      .map(k=>({key:k, score:getPlayerHoleScore(matches,k,h)}))
+      .filter(s=>s.score!==null);
+    if(scoresThisHole.length===0) continue;
+
+    const minScore = Math.min(...scoresThisHole.map(s=>s.score));
+    const winners  = scoresThisHole.filter(s=>s.score===minScore);
+
+    carryover += skinAmount;
+    if(winners.length===1){
+      const w = winners[0].key;
+      skinsByPlayer[w] = (skinsByPlayer[w]||0) + 1;
+      holes.push({hole:h, winner:w, amount:carryover});
+      carryover = 0;
+    } else {
+      holes.push({hole:h, winner:null, amount:carryover});
+    }
+  }
+  const totalPot = Object.values(skinsByPlayer).reduce((a,b)=>a+b,0) * skinAmount;
+  return { skinsByPlayer, holes, totalPot, unclaimedCarryover: carryover };
+}
+
+// Legacy whole-trip versions (used as the "quick setup" default — Nassau/Skins
+// across everyone in their existing match pairings, with no custom groups created yet)
 function deriveNassauResults(matches, betAmount=10) {
   return matches
     .filter(m => m.holeScores && Object.keys(m.holeScores).length > 0)
@@ -3026,7 +3088,185 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
 }
 
 // ─── PAYOUTS ──────────────────────────────────────────────────────────────────
-function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip}){
+// ─── SIDE GAME SETUP SCREEN ───────────────────────────────────────────────────
+// Lets the organizer create a fully custom Nassau (1v1, 2v2, etc.) or Skins
+// pool independent of the official match pairings.
+function SideGameSetupScreen({go, activeTrip, tripPlayers, onGameCreated}){
+  const [gameType,  setGameType]  = useState("nassau"); // 'nassau' | 'skins'
+  const [side1,     setSide1]     = useState([]);
+  const [side2,     setSide2]     = useState([]);
+  const [pool,      setPool]      = useState([]);
+  const [betAmount, setBetAmount] = useState(10);
+  const [gameName,  setGameName]  = useState("");
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState("");
+
+  const displayPlayers = tripPlayers.length > 0
+    ? tripPlayers.map(p=>({key:p.name.toLowerCase(), name:p.name, team:p.team}))
+    : RAW.map(p=>({key:p.key, name:p.name, team:p.team}));
+
+  const toggleInList = (key, list, setList, otherList) => {
+    if(list.includes(key)) setList(list.filter(k=>k!==key));
+    else { setList([...list,key]); if(otherList) setList; }
+  };
+
+  const togglePlayer = (key, side) => {
+    if(gameType==="skins"){
+      setPool(prev => prev.includes(key) ? prev.filter(k=>k!==key) : [...prev,key]);
+      return;
+    }
+    if(side===1){
+      setSide1(prev => prev.includes(key) ? prev.filter(k=>k!==key) : [...prev,key]);
+      setSide2(prev => prev.filter(k=>k!==key)); // remove from other side if present
+    } else {
+      setSide2(prev => prev.includes(key) ? prev.filter(k=>k!==key) : [...prev,key]);
+      setSide1(prev => prev.filter(k=>k!==key));
+    }
+  };
+
+  const canSave = gameType==="nassau"
+    ? side1.length>0 && side2.length>0
+    : pool.length>=2;
+
+  const saveGame = async () => {
+    if(!canSave){ setError(gameType==="nassau" ? "Pick at least one player per side" : "Pick at least 2 players"); return; }
+    setSaving(true); setError("");
+    try {
+      const payload = {
+        trip_id:    activeTrip?.id || null,
+        type:       gameType,
+        name:       gameName.trim() || null,
+        side1_keys: gameType==="nassau" ? side1 : null,
+        side2_keys: gameType==="nassau" ? side2 : null,
+        pool_keys:  gameType==="skins"  ? pool  : null,
+        bet_amount: betAmount,
+        active:     true,
+      };
+      const [saved] = await db.post("side_games", payload);
+      onGameCreated && onGameCreated({
+        id: saved?.id || Date.now(),
+        type: gameType, name: gameName.trim()||null,
+        side1Keys: side1, side2Keys: side2, poolKeys: pool, betAmount,
+      });
+      go("payouts");
+    } catch(e){ setError("Failed to create game: "+e.message); }
+    setSaving(false);
+  };
+
+  const nameFor = key => displayPlayers.find(p=>p.key===key)?.name || key;
+
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
+      <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"16px 20px 20px"}}>
+        <div style={{marginBottom:8}}><BackBtn go={go} to="payouts"/></div>
+        <div style={{color:C.white,fontSize:20,fontWeight:700}}>New Side Game</div>
+        <div style={{color:"rgba(255,255,255,.6)",fontSize:13,fontFamily:"Arial,sans-serif"}}>Set up a custom Nassau or Skins game — any players, any size.</div>
+      </div>
+
+      <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+        {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif"}}>{error}</div>}
+
+        {/* Game type picker */}
+        <div style={{display:"flex",gap:8}}>
+          {[["nassau","💵 Nassau"],["skins","🏆 Skins"]].map(([id,label])=>(
+            <button key={id} onClick={()=>{setGameType(id);setSide1([]);setSide2([]);setPool([]);}}
+              style={{flex:1,background:gameType===id?C.forest:C.white,color:gameType===id?C.white:C.charcoal,
+                border:`1.5px solid ${gameType===id?C.forest:C.light}`,borderRadius:12,padding:"12px",
+                fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Optional name */}
+        <div style={card()}>
+          <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:6}}>Game Name (optional)</div>
+          <input value={gameName} onChange={e=>setGameName(e.target.value)} placeholder={gameType==="nassau"?"e.g. Louie vs Ryan":"e.g. Saturday Skins"}
+            style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${C.light}`,borderRadius:10,fontSize:14,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
+        </div>
+
+        {/* Bet amount */}
+        <div style={card()}>
+          <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",letterSpacing:.7,textTransform:"uppercase",marginBottom:6}}>
+            {gameType==="nassau" ? "Bet per segment (F9/B9/18)" : "Amount per skin"}
+          </div>
+          <input type="number" value={betAmount} onChange={e=>setBetAmount(parseFloat(e.target.value)||0)}
+            style={{width:100,padding:"10px 12px",border:`1.5px solid ${C.forest}`,borderRadius:10,fontSize:16,fontWeight:700,fontFamily:"Arial,sans-serif",outline:"none",textAlign:"center"}}/>
+        </div>
+
+        {/* Player selection */}
+        {gameType==="nassau" ? (
+          <div style={{display:"flex",gap:10}}>
+            {[1,2].map(sideNum=>{
+              const list = sideNum===1?side1:side2;
+              const otherList = sideNum===1?side2:side1;
+              return(
+                <div key={sideNum} style={{flex:1,background:C.white,borderRadius:14,padding:12,boxShadow:"0 2px 8px rgba(0,0,0,.05)"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:sideNum===1?C.red:C.blue,fontFamily:"Arial,sans-serif",marginBottom:8,textTransform:"uppercase"}}>Side {sideNum}</div>
+                  {displayPlayers.map(p=>{
+                    const selected = list.includes(p.key);
+                    const disabled = otherList.includes(p.key);
+                    return(
+                      <button key={p.key} disabled={disabled} onClick={()=>togglePlayer(p.key,sideNum)}
+                        style={{width:"100%",textAlign:"left",background:selected?(sideNum===1?C.redBg:C.blueBg):C.smoke,
+                          border:`1.5px solid ${selected?(sideNum===1?C.red:C.blue):C.light}`,borderRadius:8,
+                          padding:"8px 10px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:selected?700:500,
+                          color:disabled?C.light:C.charcoal,marginBottom:5,cursor:disabled?"not-allowed":"pointer",
+                          opacity:disabled?0.4:1}}>
+                        {selected?"✓ ":""}{p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={card()}>
+            <div style={{fontSize:12,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif",marginBottom:8}}>Who's in the skins pool?</div>
+            {displayPlayers.map(p=>{
+              const selected = pool.includes(p.key);
+              return(
+                <button key={p.key} onClick={()=>togglePlayer(p.key)}
+                  style={{width:"100%",textAlign:"left",background:selected?C.greenBg:C.smoke,
+                    border:`1.5px solid ${selected?C.green:C.light}`,borderRadius:8,
+                    padding:"9px 12px",fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:selected?700:500,
+                    color:C.charcoal,marginBottom:5,cursor:"pointer"}}>
+                  {selected?"✓ ":""}{p.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Summary */}
+        {gameType==="nassau" && side1.length>0 && side2.length>0 && (
+          <div style={{...card({background:C.mist})}}>
+            <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+              {side1.map(nameFor).join(" & ")} <strong>vs</strong> {side2.map(nameFor).join(" & ")} · ${betAmount}/segment
+            </div>
+          </div>
+        )}
+        {gameType==="skins" && pool.length>0 && (
+          <div style={{...card({background:C.mist})}}>
+            <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+              {pool.length} players · ${betAmount}/skin · ${pool.length*betAmount} max pot per hole
+            </div>
+          </div>
+        )}
+
+        <button onClick={saveGame} disabled={saving||!canSave}
+          style={{...bigBtn(`linear-gradient(135deg,${canSave?C.forest:"#9CA3AF"},${canSave?C.fairway:"#D1D5DB"})`,C.white),
+            cursor:canSave?"pointer":"not-allowed"}}>
+          {saving?"Creating…":"Create Side Game →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip, sideGames}){
   const [tab,        setTab]        = useState("Side Games");
   const [nassauAmt,  setNassauAmt]  = useState(10);
   const [skinsAmt,   setSkinsAmt]   = useState(5);
@@ -3062,9 +3302,28 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip}
     Object.entries(skinsResults.skinsByPlayer).forEach(([key,count])=>{
       addMoney(key, count*skinsAmt);
     });
-    // Everyone who played pays into the pot proportionally — simplified: each skin costs skinsAmt from the pot, split among all who played that hole
-    // For simplicity here we only show winnings; "who pays who" handles the netting
   }
+
+  // ── Custom side games (independent of match pairings) ──
+  const customGameResults = (sideGames||[]).map(g=>{
+    if(g.type==="nassau"){
+      const result = deriveNassauForGroup(matches, g.side1Keys, g.side2Keys, g.betAmount);
+      [["front",result.front],["back",result.back],["overall",result.overall]].forEach(([,seg])=>{
+        if(seg.winner==="tie"||seg.winner==="none"||seg.amt===0) return;
+        const winKeys = seg.winner==="side1" ? g.side1Keys : g.side2Keys;
+        const loseKeys= seg.winner==="side1" ? g.side2Keys : g.side1Keys;
+        winKeys.forEach(k=>addMoney(k, seg.amt));
+        loseKeys.forEach(k=>addMoney(k, -seg.amt));
+      });
+      return {...g, result};
+    } else {
+      const result = deriveSkinsForGroup(matches, g.poolKeys, g.betAmount);
+      Object.entries(result.skinsByPlayer).forEach(([key,count])=>{
+        addMoney(key, count*g.betAmount);
+      });
+      return {...g, result};
+    }
+  });
 
   const allPlayerKeys = Object.keys(playerRecords);
   const players = allPlayerKeys.map(key=>({
@@ -3109,6 +3368,60 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip}
 
         {/* ── SIDE GAMES TAB ── */}
         {tab==="Side Games"&&(<>
+          <button onClick={()=>go("sidegamesetup")}
+            style={{width:"100%",background:`linear-gradient(135deg,${C.forest},${C.fairway})`,border:"none",borderRadius:14,
+              padding:"13px",fontSize:14,fontWeight:700,color:C.white,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+            + New Side Game (1v1, 2v2, custom group)
+          </button>
+
+          {/* Custom games created by the organizer */}
+          {customGameResults.length>0 && customGameResults.map(g=>(
+            <div key={g.id} style={card()}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:18}}>{g.type==="nassau"?"💵":"🏆"}</span>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700,color:C.charcoal}}>{g.name||(g.type==="nassau"?"Custom Nassau":"Custom Skins")}</div>
+                    <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>${g.betAmount} {g.type==="nassau"?"per segment":"per skin"}</div>
+                  </div>
+                </div>
+              </div>
+              {g.type==="nassau" ? (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:4}}>
+                    {g.side1Keys.map(nameForKey).join(" & ")} <strong>vs</strong> {g.side2Keys.map(nameForKey).join(" & ")}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    {[["Front 9",g.result.front],["Back 9",g.result.back],["Overall",g.result.overall]].map(([label,seg])=>(
+                      <div key={label} style={{flex:1,background:C.smoke,borderRadius:8,padding:"6px 8px",textAlign:"center"}}>
+                        <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{label}</div>
+                        <div style={{fontSize:11,fontWeight:700,color:seg.winner==="tie"||seg.winner==="none"?C.gray:C.forest,fontFamily:"Arial,sans-serif"}}>
+                          {seg.winner==="none"?"—":seg.winner==="tie"?"Tied":seg.winner==="side1"?g.side1Keys.map(nameForKey).join(" & "):g.side2Keys.map(nameForKey).join(" & ")}
+                        </div>
+                        {seg.amt>0&&<div style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif"}}>${seg.amt}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                Object.keys(g.result.skinsByPlayer).length===0
+                  ? <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:8}}>No skins won yet</div>
+                  : Object.entries(g.result.skinsByPlayer).sort((a,b)=>b[1]-a[1]).map(([key,count])=>(
+                    <div key={key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.mist}`}}>
+                      <span style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.charcoal}}>{nameForKey(key)}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:C.green,fontFamily:"Arial,sans-serif"}}>{count} skin{count!==1?"s":""} · ${count*g.betAmount}</span>
+                    </div>
+                  ))
+              )}
+            </div>
+          ))}
+
+          <div style={{display:"flex",alignItems:"center",gap:10,margin:"4px 0"}}>
+            <div style={{flex:1,height:1,background:C.light}}/>
+            <span style={{color:C.gray,fontSize:11,fontFamily:"Arial,sans-serif"}}>OR QUICK SETUP — EVERYONE</span>
+            <div style={{flex:1,height:1,background:C.light}}/>
+          </div>
+
           {/* Nassau setup + results */}
           <div style={card()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -4687,6 +5000,7 @@ export default function App(){
   const [appReady,        setAppReady]       = useState(false);
   const [editMatch,       setEditMatch]      = useState(null);
   const [tripCourses,     setTripCourses]    = useState([]);
+  const [sideGames,       setSideGames]      = useState([]);
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -4694,7 +5008,7 @@ export default function App(){
   const ts            = useMemo(()=>deriveTeamScores(matches),    [matches]);
   const playerRecords = useMemo(()=>derivePlayerRecords(matches), [matches]);
 
-  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup"];
+  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup","payouts","sidegamesetup"];
   const showNav    = navScreens.includes(screen);
   const goMatch = (matchId, dest) => {
     setSelectedMatchId(matchId);
@@ -4721,6 +5035,16 @@ export default function App(){
           tee_boxes: tees.filter(t=>t.course_id===c.id),
         }));
         setTripCourses(coursesWithTees);
+      }
+
+      // Load custom side games for this trip
+      const dbSideGames = await db.get("side_games", `trip_id=eq.${trip.id}&active=eq.true&select=*&order=created_at.asc`);
+      if(dbSideGames.length > 0){
+        setSideGames(dbSideGames.map(g=>({
+          id: g.id, type: g.type, name: g.name,
+          side1Keys: g.side1_keys||[], side2Keys: g.side2_keys||[],
+          poolKeys: g.pool_keys||[], betAmount: parseFloat(g.bet_amount)||10,
+        })));
       }
       const dbMatches = await db.get("matches",
         `trip_id=eq.${trip.id}&status=neq.deleted&select=*&order=created_at.asc`);
@@ -4877,7 +5201,8 @@ export default function App(){
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
-            {screen==="payouts"     &&<PayoutsScreen      go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
+            {screen==="payouts"     &&<PayoutsScreen      go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} {...matchProps}/>}
+            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGameCreated={g=>setSideGames(prev=>[...prev,g])}/>}
           </>)}
         </div>
         {showNav&&!tripLoading&&appReady&&<BottomNav screen={screen} set={setScreen} liveCount={matches.filter(m=>m.status==="live").length}/>}
