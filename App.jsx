@@ -1887,7 +1887,7 @@ function MatchEditScreen({go, matchId, matches, updateMatch}){
 
 
 // ─── LIVE MATCH ───────────────────────────────────────────────────────────────
-function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayers, activeTrip}){
+function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayers, activeTrip, sideGames, onAddSideGame, onEditSideGameFromLive}){
   // effectiveMatch: auto-starts upcoming matches as live when scorer taps in
   const rawMatch = matches.find(m=>m.id===matchId)
                || matches.find(m=>m.status==="live")
@@ -2503,6 +2503,39 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
       </div>
 
       <div style={{flex:1,padding:14,display:"flex",flexDirection:"column",gap:10,overflowY:"auto"}}>
+        {/* Side games attached to this match — quick access to view/edit */}
+        {(() => {
+          const gamesHere = (sideGames||[]).filter(g => g.matchId === match.id);
+          return(
+            <div style={{display:"flex",gap:8,alignItems:"center",overflowX:"auto"}}>
+              {gamesHere.map(g=>{
+                const ICONS={nassau:"💵",skins:"🏆",wolf:"🐺",stableford:"📊",vegas:"🎰"};
+                return(
+                  <button key={g.id} onClick={()=>{onEditSideGameFromLive && onEditSideGameFromLive(g);go("sidegamesetup");}}
+                    style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:C.mist,border:`1px solid ${C.light}`,borderRadius:20,padding:"6px 12px",cursor:"pointer"}}>
+                    <span style={{fontSize:13}}>{ICONS[g.type]}</span>
+                    <span style={{fontSize:11,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{g.name||g.type}</span>
+                  </button>
+                );
+              })}
+              <button onClick={()=>{
+                  onAddSideGame && onAddSideGame(match.id);
+                  go("sidegamesetup");
+                }}
+                style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:C.white,border:`1.5px dashed ${C.mint}`,borderRadius:20,padding:"6px 12px",cursor:"pointer"}}>
+                <span style={{fontSize:13,color:C.forest}}>+</span>
+                <span style={{fontSize:11,fontWeight:600,color:C.forest,fontFamily:"Arial,sans-serif"}}>{gamesHere.length>0?"Side Games":"Add Side Game"}</span>
+              </button>
+              {gamesHere.length>0&&(
+                <button onClick={()=>go("payouts")}
+                  style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:C.white,border:`1.5px solid ${C.light}`,borderRadius:20,padding:"6px 12px",cursor:"pointer"}}>
+                  <span style={{fontSize:11,fontWeight:600,color:C.slate,fontFamily:"Arial,sans-serif"}}>View All →</span>
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Hole info */}
         <div style={card({display:"flex",justifyContent:"space-around"})}>
           {[["Hole",holeNum],["Par",par],["SI",si],...(course.yardages?.[holeNum-1]?[["Yds",course.yardages[holeNum-1]]]:[[course.tee||"Blue","Tees"]])].map(([l,v])=>(
@@ -3332,10 +3365,10 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
 // ─── SIDE GAME SETUP SCREEN ───────────────────────────────────────────────────
 // Lets the organizer create a fully custom Nassau (1v1, 2v2, etc.) or Skins
 // pool independent of the official match pairings.
-function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, editGame, onGameCreated, onGameUpdated, onGameDeleted}){
+function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, editGame, prefillRound, onGameCreated, onGameUpdated, onGameDeleted}){
   const isEdit = !!editGame;
   const [gameType,  setGameType]  = useState(editGame?.type || "nassau");
-  const [roundFilter, setRoundFilter] = useState(editGame ? (editGame.matchId || "all") : "all");
+  const [roundFilter, setRoundFilter] = useState(editGame ? (editGame.matchId || "all") : (prefillRound || "all"));
   const [side1,     setSide1]     = useState(editGame?.side1Keys || []);
   const [side2,     setSide2]     = useState(editGame?.side2Keys || []);
   const [pool,      setPool]      = useState(editGame?.poolKeys || []);
@@ -3775,19 +3808,13 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
           </button>
 
           {/* Custom games created by the organizer */}
-          {customGameResults.length>0 && (
-            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",margin:"2px 0"}}>
-              Tap any game below to edit or delete it
-            </div>
-          )}
           {customGameResults.length>0 && customGameResults.map(g=>{
             const ICONS = {nassau:"💵",skins:"🏆",wolf:"🐺",stableford:"📊",vegas:"🎰"};
             const LABELS = {nassau:"Custom Nassau",skins:"Custom Skins",wolf:"Wolf",stableford:"Stableford",vegas:"Vegas"};
             const UNIT = {nassau:"per segment",skins:"per skin",wolf:"per hole",stableford:"per point",vegas:"per point"};
             return(
             <div key={g.id} style={card()}>
-              <div onClick={()=>{onEditGame&&onEditGame(g);go("sidegamesetup");}}
-                style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{fontSize:18}}>{ICONS[g.type]}</span>
                   <div>
@@ -3798,10 +3825,10 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
                     </div>
                   </div>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:4,background:C.greenBg,border:`1.5px solid ${C.mint}`,borderRadius:8,padding:"6px 12px",flexShrink:0}}>
-                  <span style={{fontSize:13}}>✏️</span>
-                  <span style={{color:C.forest,fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:700}}>Edit</span>
-                </div>
+                <button onClick={()=>{onEditGame&&onEditGame(g);go("sidegamesetup");}}
+                  style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                  Edit
+                </button>
               </div>
 
               {g.type==="nassau" && (
@@ -5463,6 +5490,7 @@ export default function App(){
   const [sideGames,       setSideGames]      = useState([]);
   const [showQuickAdd,    setShowQuickAdd]   = useState(false);
   const [editSideGame,    setEditSideGame]   = useState(null);
+  const [prefillRound,    setPrefillRound]   = useState(null); // matchId to pre-select when opening side game setup fresh
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -5655,7 +5683,10 @@ export default function App(){
             {screen==="login"       &&<LoginScreen        onAuth={handleAuth}/>}
             {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="matches"     &&<MatchesScreen      go={setScreen} {...matchProps}/>}
-            {screen==="live"        &&<LiveMatchScreen    go={setScreen} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
+            {screen==="live"        &&<LiveMatchScreen    go={setScreen} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames}
+              onAddSideGame={mId=>{setEditSideGame(null);setPrefillRound(mId);}}
+              onEditSideGameFromLive={g=>{setEditSideGame(g);setPrefillRound(null);}}
+              {...matchProps}/>}
             {screen==="board"       &&<LeaderboardScreen  go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
@@ -5665,8 +5696,8 @@ export default function App(){
             {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
             {screen==="payouts"     &&<PayoutsScreen      go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} onEditGame={g=>setEditSideGame(g)} {...matchProps}/>}
-            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} editGame={editSideGame}
-              onGameCreated={g=>setSideGames(prev=>[...prev,g])}
+            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} editGame={editSideGame} prefillRound={prefillRound}
+              onGameCreated={g=>{setSideGames(prev=>[...prev,g]);setPrefillRound(null);}}
               onGameUpdated={g=>{setSideGames(prev=>prev.map(sg=>sg.id===g.id?g:sg));setEditSideGame(null);}}
               onGameDeleted={id=>{setSideGames(prev=>prev.filter(sg=>sg.id!==id));setEditSideGame(null);}}/>}
           </>)}
