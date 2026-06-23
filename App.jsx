@@ -3775,13 +3775,19 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
           </button>
 
           {/* Custom games created by the organizer */}
+          {customGameResults.length>0 && (
+            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",margin:"2px 0"}}>
+              Tap any game below to edit or delete it
+            </div>
+          )}
           {customGameResults.length>0 && customGameResults.map(g=>{
             const ICONS = {nassau:"💵",skins:"🏆",wolf:"🐺",stableford:"📊",vegas:"🎰"};
             const LABELS = {nassau:"Custom Nassau",skins:"Custom Skins",wolf:"Wolf",stableford:"Stableford",vegas:"Vegas"};
             const UNIT = {nassau:"per segment",skins:"per skin",wolf:"per hole",stableford:"per point",vegas:"per point"};
             return(
             <div key={g.id} style={card()}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div onClick={()=>{onEditGame&&onEditGame(g);go("sidegamesetup");}}
+                style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,cursor:"pointer"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{fontSize:18}}>{ICONS[g.type]}</span>
                   <div>
@@ -3792,10 +3798,10 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
                     </div>
                   </div>
                 </div>
-                <button onClick={()=>{onEditGame&&onEditGame(g);go("sidegamesetup");}}
-                  style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",flexShrink:0}}>
-                  Edit
-                </button>
+                <div style={{display:"flex",alignItems:"center",gap:4,background:C.greenBg,border:`1.5px solid ${C.mint}`,borderRadius:8,padding:"6px 12px",flexShrink:0}}>
+                  <span style={{fontSize:13}}>✏️</span>
+                  <span style={{color:C.forest,fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:700}}>Edit</span>
+                </div>
               </div>
 
               {g.type==="nassau" && (
