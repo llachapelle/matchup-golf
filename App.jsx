@@ -2505,7 +2505,15 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
       <div style={{flex:1,padding:14,display:"flex",flexDirection:"column",gap:10,overflowY:"auto"}}>
         {/* Side games attached to this match — quick access to view/edit */}
         {(() => {
-          const gamesHere = (sideGames||[]).filter(g => g.matchId === match.id);
+          // Show only side games that include at least one player from THIS match —
+          // whether the game is scoped to this exact round, a different round, or "any round".
+          const thisMatchKeys = [...(match.p1Keys||[]), ...(match.p2Keys||[])];
+          const gamesHere = (sideGames||[]).filter(g => {
+            const gameKeys = g.type==="nassau"||g.type==="vegas"
+              ? [...(g.side1Keys||[]), ...(g.side2Keys||[])]
+              : (g.poolKeys||[]);
+            return gameKeys.some(k => thisMatchKeys.includes(k));
+          });
           return(
             <div style={{display:"flex",gap:8,alignItems:"center",overflowX:"auto"}}>
               {gamesHere.map(g=>{
