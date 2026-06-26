@@ -1077,9 +1077,18 @@ const getScrambleDisplay = (m) => {
     const diff = total-parSoFar;
     return `${total} (${diff===0?"E":diff>0?`+${diff}`:diff})`;
   };
+  // Score-to-par only (no stroke total) — used on Matches/Dashboard list views
+  // where space is tight and the total isn't needed, just relative standing.
+  const toParOnly = (total,holes) => {
+    if(holes===0) return null;
+    const parSoFar = pars.slice(0,holes).reduce((a,b)=>a+b,0);
+    const diff = total-parSoFar;
+    return diff===0?"E":diff>0?`+${diff}`:`${diff}`;
+  };
   return {
     p1Label, p2Label, p1Team, p2Team,
     p1Score: toPar(t1,h1), p2Score: toPar(t2,h2),
+    p1ScoreToPar: toParOnly(t1,h1), p2ScoreToPar: toParOnly(t2,h2),
     h1, h2,
   };
 };
@@ -1109,10 +1118,12 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
                   <div style={{display:"flex",justifyContent:"space-between"}}>
                     <div>
                       <div style={{fontSize:13,fontWeight:700,color:xd.p1Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{xd.p1Label}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
                       <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p1Banked}/{xd.target}{xd.p1Net?<span style={{fontSize:13,color:C.gray,fontWeight:500}}> · {xd.p1Net}</span>:""}</div>
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:13,fontWeight:700,color:xd.p2Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{xd.p2Label}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
                       <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p2Banked}/{xd.target}{xd.p2Net?<span style={{fontSize:13,color:C.gray,fontWeight:500}}> · {xd.p2Net}</span>:""}</div>
                     </div>
                   </div>
@@ -1128,12 +1139,14 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
                   <div style={{display:"flex",justifyContent:"space-between"}}>
                     <div>
                       <div style={{fontSize:13,fontWeight:700,color:sd.p1Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{sd.p1Label}</div>
-                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p1Score||"—"}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
+                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p1ScoreToPar||"—"}</div>
                       {sd.h1>0&&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {sd.h1}</div>}
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:13,fontWeight:700,color:sd.p2Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{sd.p2Label}</div>
-                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p2Score||"—"}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
+                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p2ScoreToPar||"—"}</div>
                       {sd.h2>0&&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {sd.h2}</div>}
                     </div>
                   </div>
@@ -1316,9 +1329,11 @@ function MatchesScreen({go, goMatch, matches, ts}){
                             <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p1Team==="red"?C.red:C.blue}}>
                               {scrDisplay.p1Label}
                             </div>
-                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p2Team==="red"?C.red:C.blue,marginTop:2}}>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
+                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p2Team==="red"?C.red:C.blue,marginTop:3}}>
                               {scrDisplay.p2Label}
                             </div>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
                             <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
                               <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
                               {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
@@ -1332,9 +1347,11 @@ function MatchesScreen({go, goMatch, matches, ts}){
                             <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p1Team==="red"?C.red:C.blue}}>
                               {xbDisplay.p1Label} <span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p1Banked}/{xbDisplay.target}</span>{xbDisplay.p1Net&&<span style={{color:C.gray,fontWeight:500}}> · {xbDisplay.p1Net}</span>}
                             </div>
-                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p2Team==="red"?C.red:C.blue,marginTop:2}}>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
+                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p2Team==="red"?C.red:C.blue,marginTop:3}}>
                               {xbDisplay.p2Label} <span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p2Banked}/{xbDisplay.target}</span>{xbDisplay.p2Net&&<span style={{color:C.gray,fontWeight:500}}> · {xbDisplay.p2Net}</span>}
                             </div>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
                             <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
                               <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
                               {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
@@ -1361,8 +1378,14 @@ function MatchesScreen({go, goMatch, matches, ts}){
                     </div>
                     <div style={{textAlign:"right"}}>
                       {isScr&&m.status==="live"&&<>
-                        <div style={{fontSize:13,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p1Team==="red"?C.red:C.blue}}>{scrDisplay.p1Score||"—"}</div>
-                        <div style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p2Team==="red"?C.red:C.blue}}>{scrDisplay.p2Score||"—"}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
+                          <span style={{fontSize:13,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p1Team==="red"?C.red:C.blue}}>{scrDisplay.p1ScoreToPar||"—"}</span>
+                          {scrDisplay.h1>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {scrDisplay.h1}</span>}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
+                          <span style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p2Team==="red"?C.red:C.blue}}>{scrDisplay.p2ScoreToPar||"—"}</span>
+                          {scrDisplay.h2>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {scrDisplay.h2}</span>}
+                        </div>
                         <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
                       </>}
                       {!isScr&&m.status==="live"&&<>
