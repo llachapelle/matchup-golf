@@ -1429,7 +1429,18 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
                         </div>
                         <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
                       </>}
-                      {!isScr&&m.status==="live"&&<>
+                      {isXB&&m.status==="live"&&<>
+                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
+                          <span style={{fontSize:13,fontWeight:700,fontFamily:"Arial,sans-serif",color:xbDisplay.p1Team==="red"?C.red:C.blue}}>{xbDisplay.p1Net||"—"}</span>
+                          {xbDisplay.p1Banked>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {xbDisplay.p1Banked}</span>}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
+                          <span style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",color:xbDisplay.p2Team==="red"?C.red:C.blue}}>{xbDisplay.p2Net||"—"}</span>
+                          {xbDisplay.p2Banked>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {xbDisplay.p2Banked}</span>}
+                        </div>
+                        <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
+                      </>}
+                      {!isScr&&!isXB&&m.status==="live"&&<>
                         <div style={{fontSize:14,fontWeight:700,fontFamily:"Arial,sans-serif",color:scoreColor(m.liveScore)}}>{m.liveScore}</div>
                         <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {m.thru}</div>
                         <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
@@ -2485,17 +2496,42 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     }
 
     // Match play (best ball, alt shot, singles, etc.)
+    // Once a match is mathematically decided (e.g. "5&3"), the result is
+    // LOCKED at that exact margin — additional holes can still be entered
+    // for fun/practice, but they never change the official outcome. This
+    // mirrors how match play actually works: the match is over the moment
+    // a side's lead exceeds the holes remaining, regardless of what happens
+    // on any holes played afterward.
     let p1=0,p2=0,ties=0;
+    let decidedAt = null; // {diff, remAtDecision, holeNumber} — set the moment the match is won
     for(let h=1;h<=18;h++){
       if(results[h]==="p1")p1++;
       else if(results[h]==="p2")p2++;
       else if(results[h]==="tie")ties++;
+
+      if(!decidedAt){
+        const playedSoFar = p1+p2+ties;
+        const diffSoFar = p1-p2;
+        const remSoFar = 18-playedSoFar;
+        if(Math.abs(diffSoFar) > remSoFar){
+          decidedAt = { diff: diffSoFar, rem: remSoFar };
+        }
+      }
     }
-    const played=p1+p2+ties, diff=p1-p2, rem=18-played;
+
+    const played=p1+p2+ties;
     if(played===0) return {text:match.liveScore||"Not started", color:"rgba(255,255,255,.8)"};
     const p1Label=match.p1, p2Label=match.p2;
-    if(diff>rem)  return {text:`${p1Label} wins ${diff}&${rem}`, color:p1Col};
-    if(-diff>rem) return {text:`${p2Label} wins ${-diff}&${rem}`, color:p2Col};
+
+    // Match already mathematically won — report the FROZEN margin, not a
+    // recalculated one based on any extra holes played after the win.
+    if(decidedAt){
+      const {diff, rem} = decidedAt;
+      if(diff>0) return {text:`${p1Label} wins ${diff}&${rem}`, color:p1Col};
+      return {text:`${p2Label} wins ${-diff}&${rem}`, color:p2Col};
+    }
+
+    const diff=p1-p2, rem=18-played;
     if(played===18){
       if(diff>0) return {text:`${p1Label} wins 1UP`, color:p1Col};
       if(diff<0) return {text:`${p2Label} wins 1UP`, color:p2Col};
@@ -2700,12 +2736,30 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
               ws=t1<t2?"p1":t2<t1?"p2":"halve";
               scoreStr=ws==="halve"?`Tied (${t1})`:`${ws==="p1"?match.p1:match.p2} wins (${Math.min(t1,t2)} vs ${Math.max(t1,t2)})`;
             } else {
-              const p1w=Object.values(holeResults).filter(v=>v==="p1").length;
-              const p2w=Object.values(holeResults).filter(v=>v==="p2").length;
-              const ties=Object.values(holeResults).filter(v=>v==="tie").length;
-              ws=p1w>p2w?"p1":p2w>p1w?"p2":"halve";
-              const diff=Math.abs(p1w-p2w),rem=18-(p1w+p2w+ties);
-              scoreStr=ws==="halve"?"All Square":diff>rem?`${diff}&${rem}`:"1UP";
+              // Walk holes in order and freeze the result at the exact moment
+              // the match became mathematically decided — extra holes played
+              // after that point never change the official outcome.
+              let p1c=0,p2c=0,tiesc=0,decided=null;
+              for(let h=1;h<=18;h++){
+                const r=holeResults[h];
+                if(r==="p1")p1c++; else if(r==="p2")p2c++; else if(r==="tie")tiesc++;
+                if(!decided){
+                  const playedc=p1c+p2c+tiesc, diffc=p1c-p2c, remc=18-playedc;
+                  if(Math.abs(diffc)>remc) decided={diff:diffc, rem:remc};
+                }
+              }
+              if(decided){
+                ws = decided.diff>0 ? "p1" : "p2";
+                scoreStr = `${Math.abs(decided.diff)}&${decided.rem}`;
+              } else {
+                const played=p1c+p2c+tiesc;
+                ws = p1c>p2c?"p1":p2c>p1c?"p2":"halve";
+                if(played===18){
+                  scoreStr = ws==="halve" ? "All Square" : "1UP";
+                } else {
+                  scoreStr = ws==="halve" ? "All Square" : `${Math.abs(p1c-p2c)} UP thru ${played}`;
+                }
+              }
             }
             await finishMatch({winnerSide:ws, text:scoreStr});
             go("board");
@@ -2792,13 +2846,19 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
         )}
       </div>
 
-      {/* Hole progress dots */}
+      {/* Hole progress dots — colored by actual team (red/blue), not just "p1/p2" side order.
+          Only meaningful for match-play formats where each hole has a winner;
+          Scramble and X-Ball don't have per-hole winners so dots stay neutral there. */}
       <div style={{background:C.white,padding:"9px 14px",display:"flex",gap:3,justifyContent:"center",borderBottom:`1px solid ${C.mist}`}}>
         {Array.from({length:18},(_,i)=>i+1).map(h=>{
           const res=holeResults[h], cur=h===holeNum;
-          const bg=cur?C.sand:res==="p1"?C.redBg:res==="p2"?C.blueBg:res==="tie"?C.mist:"transparent";
+          const showResultColor = !isScramble && !isXBall; // match-play only
+          const winColor = res==="p1" ? (p1Team==="red"?C.redBg:C.blueBg)
+                         : res==="p2" ? (p2Team==="red"?C.redBg:C.blueBg)
+                         : res==="tie" ? C.mist : "transparent";
+          const bg = cur ? C.sand : (showResultColor ? winColor : "transparent");
           return(
-            <div key={h} onClick={()=>setHoleNum(h)} style={{width:16,height:16,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,fontFamily:"Arial,sans-serif",background:bg,border:cur?`2px solid ${C.sand}`:`1.5px solid ${res?"transparent":C.light}`,color:cur?C.charcoal:C.gray}}>
+            <div key={h} onClick={()=>setHoleNum(h)} style={{width:16,height:16,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,fontFamily:"Arial,sans-serif",background:bg,border:cur?`2px solid ${C.sand}`:`1.5px solid ${(showResultColor&&res)?"transparent":C.light}`,color:cur?C.charcoal:C.gray}}>
               {cur?h:""}
             </div>
           );
