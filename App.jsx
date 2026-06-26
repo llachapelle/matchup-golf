@@ -2520,7 +2520,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
             return gameKeys.some(k => thisMatchKeys.includes(k));
           });
           return(
-            <div style={{display:"flex",gap:8,alignItems:"center",overflowX:"auto"}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",touchAction:"pan-x"}}>
               {gamesHere.map(g=>{
                 const ICONS={nassau:"💵",skins:"🏆",wolf:"🐺",stableford:"📊",vegas:"🎰"};
                 return(
