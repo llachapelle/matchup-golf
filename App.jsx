@@ -2093,20 +2093,27 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   const [remoteUpdateBanner, setRemoteUpdateBanner] = useState(false);
 
   // When another device saves a score (via Realtime), merge it in here —
-  // but only for holes this device hasn't already got data for, so a partner
-  // scoring hole 9 on their phone doesn't wipe out what you're mid-typing.
+  // merging happens per PLAYER, not per hole, so if you've already entered
+  // your own score on hole 5 but your partner just submitted theirs on the
+  // same hole, their score still comes through instead of being blocked.
   useEffect(() => {
     const incoming = match.holeScores || {};
     let changed = false;
     setHoleScores(prev => {
       const next = {...prev};
-      Object.entries(incoming).forEach(([h, scores])=>{
+      Object.entries(incoming).forEach(([h, remoteScores])=>{
         const hNum = Number(h);
-        const localHasData = Object.keys(prev[hNum]||{}).length > 0;
-        if(!localHasData && Object.keys(scores||{}).length > 0){
-          next[hNum] = {...scores};
-          changed = true;
-        }
+        const localScores = prev[hNum] || {};
+        const mergedScores = {...localScores};
+        Object.entries(remoteScores||{}).forEach(([key, val])=>{
+          // Only fill in keys we don't already have locally — never overwrite
+          // a score this device itself entered for that specific player.
+          if(mergedScores[key] === undefined || mergedScores[key] === ""){
+            mergedScores[key] = val;
+            changed = true;
+          }
+        });
+        next[hNum] = mergedScores;
       });
       return changed ? next : prev;
     });
@@ -5604,6 +5611,25 @@ export default function App(){
       const dbMatches = await db.get("matches",
         `trip_id=eq.${trip.id}&status=neq.deleted&select=*&order=created_at.asc`);
       if(dbMatches.length > 0){
+        // Fetch every hole score row for these matches and rebuild each match's
+        // holeScores map — without this, scores entered during live scoring
+        // would vanish on every page reload even though they're saved in the DB.
+        const matchIds = dbMatches.map(m=>m.id);
+        let holeScoresByMatch = {};
+        try {
+          const allHoleScores = await db.get("hole_scores",
+            `match_id=in.(${matchIds.join(",")})&select=*`);
+          allHoleScores.forEach(hs => {
+            if(!holeScoresByMatch[hs.match_id]) holeScoresByMatch[hs.match_id] = {};
+            const matchScores = holeScoresByMatch[hs.match_id];
+            if(!matchScores[hs.hole_number]) matchScores[hs.hole_number] = {};
+            // Resolve player_id back to the lowercase-name key used throughout the app
+            const tp = players.find(p => p.id === hs.player_id);
+            const key = tp ? tp.name.toLowerCase() : hs.player_id;
+            matchScores[hs.hole_number][key] = hs.gross_score;
+          });
+        } catch(e){ console.warn("Failed to load hole_scores:", e.message); }
+
         const appMatches = dbMatches.map(m => ({
           id:          m.id,
           round:       1,
@@ -5627,7 +5653,7 @@ export default function App(){
           par:         m.par         || null,
           hole_data:    m.hole_data    || null,
           bankedScores: m.banked_scores ? (typeof m.banked_scores==="string"?JSON.parse(m.banked_scores):m.banked_scores) : {},
-          holeScores:  {},
+          holeScores:  holeScoresByMatch[m.id] || {},
         }));
         setMatches(appMatches);
       }
