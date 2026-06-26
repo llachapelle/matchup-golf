@@ -78,6 +78,20 @@ const auth = {
       headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${token}`}
     });
   },
+
+  // Exchanges a refresh_token for a brand new access_token without requiring
+  // the person to log in again. Supabase access tokens expire after ~1 hour;
+  // without this, everyone would get logged out constantly even mid-session.
+  async refreshSession(refreshToken){
+    const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json","apikey":SUPA_KEY},
+      body:JSON.stringify({refresh_token: refreshToken})
+    });
+    const json = await r.json();
+    if(json.session) return { ...json.session, user: json.user };
+    return json;
+  },
 };
 
 // ─── COLORS ───────────────────────────────────────────────────────────────────
@@ -769,13 +783,18 @@ function TeamScoreCards({ts, showRemaining=true}){
 function LoginScreen({onAuth}){
   const [mode,    setMode]    = useState("join");   // join | signin | signup
   const [code,    setCode]    = useState(["","","","","",""]);
-  const [email,   setEmail]   = useState("");
+  const [email,   setEmail]   = useState(()=>{
+    try { return localStorage.getItem("matchup_remembered_email") || ""; } catch(e){ return ""; }
+  });
   const [pw,      setPw]      = useState("");
   const [name,    setName]    = useState("");
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState("");
   const [joinStep, setJoinStep] = useState("code"); // "code" -> "account" once trip is found
   const [foundTrip, setFoundTrip] = useState(null);
+  const [rememberEmail, setRememberEmail] = useState(()=>{
+    try { return !!localStorage.getItem("matchup_remembered_email"); } catch(e){ return false; }
+  });
 
   const upd=(v,i)=>{const c=[...code];c[i]=v.slice(-1).toUpperCase();setCode(c);if(v&&i<5)document.getElementById(`ci${i+1}`)?.focus();};
   const kd=(e,i)=>{if(e.key==="Backspace"&&!code[i]&&i>0)document.getElementById(`ci${i-1}`)?.focus();};
@@ -850,6 +869,10 @@ function LoginScreen({onAuth}){
       const res = await auth.signIn(email, pw);
       if(res.error) throw new Error(res.error.message||res.error.msg||JSON.stringify(res.error));
       if(!res.access_token) throw new Error("Sign in failed — check your email and password");
+      try {
+        if(rememberEmail) localStorage.setItem("matchup_remembered_email", email);
+        else localStorage.removeItem("matchup_remembered_email");
+      } catch(e){}
       onAuth({ mode:"auth", session: res });
     } catch(e){
       const msg = e.message||"";
@@ -967,6 +990,11 @@ function LoginScreen({onAuth}){
           <div style={{fontSize:18,fontWeight:700,color:C.charcoal,marginBottom:12}}>Welcome Back</div>
           {inp(email,setEmail,"Email","email")}
           {inp(pw,setPw,"Password","password")}
+          <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,cursor:"pointer"}}>
+            <input type="checkbox" checked={rememberEmail} onChange={e=>setRememberEmail(e.target.checked)}
+              style={{width:18,height:18,accentColor:C.forest,cursor:"pointer"}}/>
+            <span style={{fontSize:13,color:C.slate,fontFamily:"Arial,sans-serif"}}>Remember my email on this device</span>
+          </label>
           <button onClick={handleSignIn} disabled={loading} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white)}>
             {loading?"Signing in…":"Sign In →"}
           </button>
@@ -990,6 +1018,19 @@ function LoginScreen({onAuth}){
 // ─── SCRAMBLE DISPLAY HELPER ───────────────────────────────────────────────────
 // For 4v4 scramble-style matches, returns clean "Team Red"/"Team Blue" labels
 // and score-to-par strings instead of long player lists / raw match-play text
+// Resolves a player key (lowercase name) back to their name exactly as
+// entered on the trip roster — correct capitalization, spacing, etc. —
+// rather than guessing or relying on the lowercase key itself. Falls back
+// to the RAW demo roster when no real tripPlayers data exists yet.
+const resolvePlayerName = (key, tripPlayers) => {
+  const tp = tripPlayers?.find(p => p.name.toLowerCase() === key);
+  if(tp) return tp.name;
+  const raw = RAW.find(p => p.key === key);
+  if(raw) return raw.name;
+  // Last resort: title-case the key so it at least isn't all-lowercase
+  return key.replace(/\b\w/g, c => c.toUpperCase());
+};
+
 const isScrambleFormat = m => (m.format||"").toLowerCase().includes("scramble");
 const isXBallFormat = m => {
   const f = (m.format||"").toLowerCase();
@@ -1093,7 +1134,7 @@ const getScrambleDisplay = (m) => {
   };
 };
 
-function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
+function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, tripPlayers}){
   const live = matches.filter(m=>m.status==="live");
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
@@ -1118,13 +1159,13 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
                   <div style={{display:"flex",justifyContent:"space-between"}}>
                     <div>
                       <div style={{fontSize:13,fontWeight:700,color:xd.p1Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{xd.p1Label}</div>
-                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
-                      <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p1Banked}/{xd.target}{xd.p1Net?<span style={{fontSize:13,color:C.gray,fontWeight:500}}> · {xd.p1Net}</span>:""}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1}</div>
+                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p1Net||"—"}<span style={{fontSize:12,color:C.gray,fontWeight:500}}> · {xd.p1Banked}/{xd.target}</span></div>
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:13,fontWeight:700,color:xd.p2Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{xd.p2Label}</div>
-                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
-                      <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p2Banked}/{xd.target}{xd.p2Net?<span style={{fontSize:13,color:C.gray,fontWeight:500}}> · {xd.p2Net}</span>:""}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2}</div>
+                      <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p2Net||"—"}<span style={{fontSize:12,color:C.gray,fontWeight:500}}> · {xd.p2Banked}/{xd.target}</span></div>
                     </div>
                   </div>
                 </div>
@@ -1139,13 +1180,13 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
                   <div style={{display:"flex",justifyContent:"space-between"}}>
                     <div>
                       <div style={{fontSize:13,fontWeight:700,color:sd.p1Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{sd.p1Label}</div>
-                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1}</div>
                       <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p1ScoreToPar||"—"}</div>
                       {sd.h1>0&&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {sd.h1}</div>}
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:13,fontWeight:700,color:sd.p2Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{sd.p2Label}</div>
-                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
+                      <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-2,marginBottom:2}}>{(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2}</div>
                       <div style={{fontSize:18,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{sd.p2ScoreToPar||"—"}</div>
                       {sd.h2>0&&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {sd.h2}</div>}
                     </div>
@@ -1221,7 +1262,7 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
 }
 
 // ─── MATCHES ──────────────────────────────────────────────────────────────────
-function MatchesScreen({go, goMatch, matches, ts}){
+function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
   const [filter,setFilter]=useState("All");
   const [dayFilter,setDayFilter]=useState("All Days");
   const [expandedMatch,setExpandedMatch]=useState(null);
@@ -1329,11 +1370,11 @@ function MatchesScreen({go, goMatch, matches, ts}){
                             <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p1Team==="red"?C.red:C.blue}}>
                               {scrDisplay.p1Label}
                             </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1}</div>
                             <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p2Team==="red"?C.red:C.blue,marginTop:3}}>
                               {scrDisplay.p2Label}
                             </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2}</div>
                             <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
                               <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
                               {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
@@ -1345,13 +1386,13 @@ function MatchesScreen({go, goMatch, matches, ts}){
                         if(isXB){
                           return(<>
                             <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p1Team==="red"?C.red:C.blue}}>
-                              {xbDisplay.p1Label} <span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p1Banked}/{xbDisplay.target}</span>{xbDisplay.p1Net&&<span style={{color:C.gray,fontWeight:500}}> · {xbDisplay.p1Net}</span>}
+                              {xbDisplay.p1Label} {xbDisplay.p1Net&&<span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p1Net}</span>} <span style={{color:C.gray,fontWeight:500}}>· {xbDisplay.p1Banked}/{xbDisplay.target}</span>
                             </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p1}</div>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1}</div>
                             <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p2Team==="red"?C.red:C.blue,marginTop:3}}>
-                              {xbDisplay.p2Label} <span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p2Banked}/{xbDisplay.target}</span>{xbDisplay.p2Net&&<span style={{color:C.gray,fontWeight:500}}> · {xbDisplay.p2Net}</span>}
+                              {xbDisplay.p2Label} {xbDisplay.p2Net&&<span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p2Net}</span>} <span style={{color:C.gray,fontWeight:500}}>· {xbDisplay.p2Banked}/{xbDisplay.target}</span>
                             </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>(RAW.find(p=>p.key===k)?.name||k)).join(", ")||m.p2}</div>
+                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2}</div>
                             <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
                               <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
                               {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
@@ -5659,6 +5700,24 @@ export default function App(){
   const [selectedMatchId, setSelectedMatchId]= useState(null);
   const [matches,         setMatches]        = useState(INITIAL_MATCHES);
   const [session,         setSession]        = useState(null);
+
+  // While the app is open, proactively refresh the access token every 50
+  // minutes (tokens last ~60 min) so an active session never expires
+  // mid-use — this is on top of the on-load refresh check, covering the
+  // case where someone leaves the app open for hours without reloading.
+  useEffect(() => {
+    if(!session?.refresh_token) return;
+    const interval = setInterval(async () => {
+      try {
+        const refreshed = await auth.refreshSession(session.refresh_token);
+        if(refreshed.access_token){
+          setSession(refreshed);
+          try { localStorage.setItem("matchup_session", JSON.stringify(refreshed)); } catch(e){}
+        }
+      } catch(e){ /* will retry on next interval or on next reload */ }
+    }, 50 * 60 * 1000); // 50 minutes
+    return () => clearInterval(interval);
+  }, [session?.refresh_token]);
   const [activeTrip,      setActiveTrip]     = useState(null);
   const [tripLoading,     setTripLoading]    = useState(false);
   const [tripPlayers,     setTripPlayers]    = useState([]);
@@ -5895,11 +5954,26 @@ export default function App(){
       try {
         const stored = localStorage.getItem("matchup_session");
         if(stored){
-          const s = JSON.parse(stored);
+          let s = JSON.parse(stored);
           // Validate token hasn't expired
           const exp = s.expires_at || s.user?.exp;
           const isExpired = exp && (exp * 1000) < Date.now();
-          if(!isExpired && s.access_token && s.user?.id){
+
+          if(isExpired && s.refresh_token){
+            // Access token expired but we have a refresh token — silently get
+            // a new access token instead of forcing a fresh login. This is
+            // the fix for getting logged out every ~hour even mid-session.
+            try {
+              const refreshed = await auth.refreshSession(s.refresh_token);
+              if(refreshed.access_token){
+                s = refreshed;
+                try { localStorage.setItem("matchup_session", JSON.stringify(s)); } catch(e){}
+              }
+            } catch(e){ /* refresh failed — fall through */ }
+          }
+
+          const stillExpired = (s.expires_at||s.user?.exp) && ((s.expires_at||s.user?.exp) * 1000) < Date.now();
+          if(!stillExpired && s.access_token && s.user?.id){
             setSession(s);
             try {
               // Find a trip this user is connected to — either one they organized,
@@ -6024,8 +6098,8 @@ export default function App(){
             </div>
           ) : (<>
             {screen==="login"       &&<LoginScreen        onAuth={handleAuth}/>}
-            {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} {...matchProps}/>}
-            {screen==="matches"     &&<MatchesScreen      go={setScreen} {...matchProps}/>}
+            {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} {...matchProps}/>}
+            {screen==="matches"     &&<MatchesScreen      go={setScreen} tripPlayers={tripPlayers} {...matchProps}/>}
             {screen==="live"        &&<LiveMatchScreen    go={setScreen} goBack={goBack} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames}
               onAddSideGame={mId=>{setEditSideGame(null);setPrefillRound(mId);}}
               onEditSideGameFromLive={g=>{setEditSideGame(g);setPrefillRound(null);}}
