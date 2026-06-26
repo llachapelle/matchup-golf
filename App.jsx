@@ -2532,8 +2532,8 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                 );
               })}
               <button onClick={()=>{
-                  try { onAddSideGame && onAddSideGame(match.id); } catch(e){ alert("onAddSideGame error: "+e.message); }
-                  try { go("sidegamesetup"); } catch(e){ alert("go error: "+e.message); }
+                  onAddSideGame && onAddSideGame(match.id);
+                  go("sidegamesetup");
                 }}
                 style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:C.white,border:`1.5px dashed ${C.mint}`,borderRadius:20,padding:"6px 12px",cursor:"pointer"}}>
                 <span style={{fontSize:13,color:C.forest}}>+</span>
@@ -5404,6 +5404,8 @@ export default function App(){
   const [tripCourses,     setTripCourses]    = useState([]);
   const [sideGames,       setSideGames]      = useState([]);
   const [showQuickAdd,    setShowQuickAdd]   = useState(false);
+  const [editSideGame,    setEditSideGame]   = useState(null);
+  const [prefillRound,    setPrefillRound]   = useState(null); // matchId to pre-select when opening side game setup fresh
   // setScreen pushes the CURRENT screen onto history before navigating, so Back
   // always returns to wherever the person actually came from — not a hardcoded
   // destination. Bottom-nav taps (dashboard/matches/board/trip/profile) reset
