@@ -991,6 +991,63 @@ function LoginScreen({onAuth}){
 // For 4v4 scramble-style matches, returns clean "Team Red"/"Team Blue" labels
 // and score-to-par strings instead of long player lists / raw match-play text
 const isScrambleFormat = m => (m.format||"").toLowerCase().includes("scramble");
+const isXBallFormat = m => {
+  const f = (m.format||"").toLowerCase();
+  return f.includes("ball") && (f.includes("20")||f.includes("40"));
+};
+
+// For 20 Ball / 40 Ball matches: shows banked count AND net score-to-par per
+// side on the Matches/Dashboard tabs, matching what's shown inside the live
+// scoring screen itself.
+const getXBallDisplay = (m) => {
+  const p1Team = (m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "red";
+  const p2Team = (m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "blue";
+  const p1Label = `Team ${p1Team==="red"?"Red":"Blue"}`;
+  const p2Label = `Team ${p2Team==="red"?"Red":"Blue"}`;
+  const target = (m.format||"").toLowerCase().includes("40") ? 40 : 20;
+
+  const hs = m.holeScores || {};
+  const banked = m.bankedScores || {};
+  let pars = COURSES.mammoth.pars;
+  if(m.hole_data){
+    try {
+      const parsed = typeof m.hole_data === "string" ? JSON.parse(m.hole_data) : m.hole_data;
+      if(Array.isArray(parsed) && parsed.length === 18) pars = parsed.map(h=>h.par);
+    } catch(e){}
+  }
+
+  const bankedNetForSide = (sideKeys) => {
+    let count=0, netTotal=0;
+    for(let h=1; h<=18; h++){
+      const hBanked = banked[h] || {};
+      const hScores = hs[h] || {};
+      const par = pars[h-1] || 4;
+      sideKeys.forEach(k=>{
+        if(hBanked[k]){
+          const gross = parseInt(hScores[k]);
+          if(!isNaN(gross) && gross>0){
+            count++;
+            netTotal += (gross - par); // simple net-to-par; WHS strokes applied during live entry already reflected in gross if needed
+          }
+        }
+      });
+    }
+    return {count, netTotal};
+  };
+
+  const p1Keys = m.p1Keys||[];
+  const p2Keys = m.p2Keys||[];
+  const r1 = bankedNetForSide(p1Keys);
+  const r2 = bankedNetForSide(p2Keys);
+  const fmtNet = n => n===0?"E":n>0?`+${n}`:`${n}`;
+
+  return {
+    p1Label, p2Label, p1Team, p2Team, target,
+    p1Banked: r1.count, p2Banked: r2.count,
+    p1Net: r1.count>0 ? fmtNet(r1.netTotal) : null,
+    p2Net: r2.count>0 ? fmtNet(r2.netTotal) : null,
+  };
+};
 
 const getScrambleDisplay = (m) => {
   const p1Team = (m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "red";
@@ -1042,6 +1099,26 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip}){
           </div>
           {live.map(m=>{
             const isScr = isScrambleFormat(m);
+            const isXB  = isXBallFormat(m);
+
+            if(isXB){
+              const xd = getXBallDisplay(m);
+              return(
+                <div key={m.id} onClick={()=>goMatch(m.id,"live")} style={{...card({marginBottom:8,cursor:"pointer",border:`1.5px solid ${C.mint}`})}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE · {xd.target} BALL</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:xd.p1Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{xd.p1Label}</div>
+                      <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p1Banked}/{xd.target}{xd.p1Net?<span style={{fontSize:13,color:C.gray,fontWeight:500}}> · {xd.p1Net}</span>:""}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:13,fontWeight:700,color:xd.p2Team==="red"?C.red:C.blue,fontFamily:"Arial,sans-serif"}}>{xd.p2Label}</div>
+                      <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{xd.p2Banked}/{xd.target}{xd.p2Net?<span style={{fontSize:13,color:C.gray,fontWeight:500}}> · {xd.p2Net}</span>:""}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
 
             if(isScr){
               const sd = getScrambleDisplay(m);
@@ -1212,6 +1289,8 @@ function MatchesScreen({go, goMatch, matches, ts}){
               const isHalve = m.winnerSide==="halve";
               const isScr = isScrambleFormat(m);
               const scrDisplay = isScr ? getScrambleDisplay(m) : null;
+              const isXB = isXBallFormat(m);
+              const xbDisplay = isXB ? getXBallDisplay(m) : null;
 
               return(
                 <div key={m.id} style={{...card({marginBottom:8,border:
@@ -1239,6 +1318,22 @@ function MatchesScreen({go, goMatch, matches, ts}){
                             </div>
                             <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p2Team==="red"?C.red:C.blue,marginTop:2}}>
                               {scrDisplay.p2Label}
+                            </div>
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
+                              <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
+                              {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
+                            </div>
+                          </>);
+                        }
+
+                        // X-Ball (20/40 Ball): show banked progress + net score-to-par per side
+                        if(isXB){
+                          return(<>
+                            <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p1Team==="red"?C.red:C.blue}}>
+                              {xbDisplay.p1Label} <span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p1Banked}/{xbDisplay.target}</span>{xbDisplay.p1Net&&<span style={{color:C.gray,fontWeight:500}}> · {xbDisplay.p1Net}</span>}
+                            </div>
+                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p2Team==="red"?C.red:C.blue,marginTop:2}}>
+                              {xbDisplay.p2Label} <span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p2Banked}/{xbDisplay.target}</span>{xbDisplay.p2Net&&<span style={{color:C.gray,fontWeight:500}}> · {xbDisplay.p2Net}</span>}
                             </div>
                             <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
                               <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
@@ -2411,6 +2506,12 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
         await db.patch("matches",`id=eq.${match.id}`,{
           thru:holeNum, live_score:newStatus.text, status:"live",
           banked_scores: isXBall ? JSON.stringify(bankedScores) : undefined,
+          // Scramble/Alt Shot use "team_p1"/"team_p2" keys, and X-Ball banking
+          // needs every individual hole score preserved — neither maps cleanly
+          // to the per-player hole_scores table (which requires a real player
+          // UUID), so for these formats the full score map is saved directly
+          // on the match row and read back from there on reload instead.
+          score_data: (isTeamScoreFormat || isXBall) ? JSON.stringify(newHoleScores) : undefined,
         });
       } catch(e){console.warn("Failed to save hole:",e.message);}
     }
@@ -5663,7 +5764,24 @@ export default function App(){
           par:         m.par         || null,
           hole_data:    m.hole_data    || null,
           bankedScores: m.banked_scores ? (typeof m.banked_scores==="string"?JSON.parse(m.banked_scores):m.banked_scores) : {},
-          holeScores:  holeScoresByMatch[m.id] || {},
+          // score_data holds the full hole-by-hole map for Scramble/Alt Shot/
+          // X-Ball formats (team_p1/team_p2 keys, or per-player keys for X-Ball
+          // banking) — these don't fit the per-player UUID-based hole_scores
+          // table, so they're saved/restored as one JSON blob on the match row.
+          holeScores: (() => {
+            const fromHoleScoresTable = holeScoresByMatch[m.id] || {};
+            if(!m.score_data) return fromHoleScoresTable;
+            try {
+              const parsed = typeof m.score_data==="string" ? JSON.parse(m.score_data) : m.score_data;
+              // Merge: score_data is authoritative for team/X-ball formats,
+              // but don't discard anything also tracked via hole_scores.
+              const merged = {...fromHoleScoresTable};
+              Object.entries(parsed||{}).forEach(([h, scores])=>{
+                merged[h] = {...(merged[h]||{}), ...scores};
+              });
+              return merged;
+            } catch(e){ return fromHoleScoresTable; }
+          })(),
         }));
         setMatches(appMatches);
       }
@@ -5703,6 +5821,19 @@ export default function App(){
               course_name:  row.course_name ?? m.course_name,
               tee_name:     row.tee_name    ?? m.tee_name,
               bankedScores: row.banked_scores ? (typeof row.banked_scores==="string"?JSON.parse(row.banked_scores):row.banked_scores) : m.bankedScores,
+              holeScores: (() => {
+                if(!row.score_data) return m.holeScores;
+                try {
+                  const parsed = typeof row.score_data==="string" ? JSON.parse(row.score_data) : row.score_data;
+                  const merged = {...m.holeScores};
+                  Object.entries(parsed||{}).forEach(([h, scores])=>{
+                    // Fill in only keys not already present locally — never
+                    // overwrite a score this device itself is mid-entering.
+                    merged[h] = {...scores, ...(merged[h]||{})};
+                  });
+                  return merged;
+                } catch(e){ return m.holeScores; }
+              })(),
             } : m);
           });
         }
