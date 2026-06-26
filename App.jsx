@@ -683,7 +683,12 @@ function Header({sub,title,detail,right,small=false,onProfile}){
     </div>
   );
 }
-function BackBtn({go,to}){return <button onClick={()=>go(to)} style={{background:"rgba(255,255,255,.15)",border:"none",color:C.white,borderRadius:8,padding:"5px 11px",fontSize:12,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>← Back</button>;}
+function BackBtn({goBack,go,to}){
+  // Prefer goBack (real navigation history) when available; fall back to the
+  // hardcoded `to` destination only for screens that haven't been wired up yet.
+  const handleClick = () => goBack ? goBack() : go(to);
+  return <button onClick={handleClick} style={{background:"rgba(255,255,255,.15)",border:"none",color:C.white,borderRadius:8,padding:"5px 11px",fontSize:12,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>← Back</button>;
+}
 function StatRow({items}){return(<div style={{display:"flex",gap:8}}>{items.map(({label,value,color=C.charcoal,bg=C.smoke})=>(<div key={label} style={{flex:1,background:bg,borderRadius:14,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color,fontFamily:"Arial,sans-serif"}}>{value}</div><div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>{label}</div></div>))}</div>);}
 
 function BottomNav({screen,set,liveCount=0}){
@@ -1385,7 +1390,7 @@ function MatchesScreen({go, goMatch, matches, ts}){
 }
 
 // ─── MATCH EDIT SCREEN ────────────────────────────────────────────────────────
-function MatchEditScreen({go, matchId, matches, updateMatch}){
+function MatchEditScreen({go, goBack, matchId, matches, updateMatch}){
   const match  = matches.find(m=>m.id===matchId && m.status==="completed")
               || matches.find(m=>m.status==="completed")
               || matches[0];
@@ -1593,7 +1598,7 @@ function MatchEditScreen({go, matchId, matches, updateMatch}){
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"14px 20px 18px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <BackBtn go={go} to="matches"/>
+          <BackBtn goBack={goBack} go={go} to="matches"/>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {locked
               ? <span style={{...pill(C.amberBg,C.amber),fontSize:11}}>🔒 Locked</span>
@@ -1887,7 +1892,7 @@ function MatchEditScreen({go, matchId, matches, updateMatch}){
 
 
 // ─── LIVE MATCH ───────────────────────────────────────────────────────────────
-function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayers, activeTrip, sideGames, onAddSideGame, onEditSideGameFromLive}){
+function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tripPlayers, activeTrip, sideGames, onAddSideGame, onEditSideGameFromLive}){
   // effectiveMatch: auto-starts upcoming matches as live when scorer taps in
   const rawMatch = matches.find(m=>m.id===matchId)
                || matches.find(m=>m.status==="live")
@@ -2419,7 +2424,7 @@ function LiveMatchScreen({go, goMatch, matchId, matches, updateMatch, tripPlayer
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke,position:"relative"}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"14px 18px 16px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <BackBtn go={go} to="matches"/>
+          <BackBtn goBack={goBack} go={go} to="matches"/>
           <div style={{display:"flex",gap:6}}>
             <button onClick={()=>setShowNet(!showNet)}
               style={{background:showNet?C.mint:"rgba(255,255,255,.15)",border:"none",color:showNet?C.forest:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:700}}>
@@ -2890,7 +2895,7 @@ function FormatCard({item, actionLabel, isFormat}){
 }
 
 // ─── SIDE GAMES HUB ───────────────────────────────────────────────────────────
-function SideGamesScreen({go}){
+function SideGamesScreen({go, goBack}){
   const [tab,setTab]=useState("Active");
   const [catFilter,setCatFilter]=useState("All");
 
@@ -2964,7 +2969,7 @@ function SideGamesScreen({go}){
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"14px 20px 18px"}}>
-        <div style={{marginBottom:8}}><BackBtn go={go} to="board"/></div>
+        <div style={{marginBottom:8}}><BackBtn goBack={goBack} go={go} to="board"/></div>
         <div style={{color:"rgba(255,255,255,.6)",fontSize:11,fontFamily:"Arial,sans-serif",letterSpacing:"1.2px",textTransform:"uppercase",marginBottom:3}}>Sand Valley Ryder Cup</div>
         <div style={{color:C.white,fontSize:20,fontWeight:700}}>Side Games</div>
       </div>
@@ -3373,7 +3378,7 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
 // ─── SIDE GAME SETUP SCREEN ───────────────────────────────────────────────────
 // Lets the organizer create a fully custom Nassau (1v1, 2v2, etc.) or Skins
 // pool independent of the official match pairings.
-function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, editGame, prefillRound, onGameCreated, onGameUpdated, onGameDeleted}){
+function SideGameSetupScreen({go, goBack, activeTrip, tripPlayers, matches, editGame, prefillRound, onGameCreated, onGameUpdated, onGameDeleted}){
   const isEdit = !!editGame;
   const [gameType,  setGameType]  = useState(editGame?.type || "nassau");
   const [roundFilter, setRoundFilter] = useState(editGame ? (editGame.matchId || "all") : (prefillRound || "all"));
@@ -3493,7 +3498,7 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, editGame, pr
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"16px 20px 20px"}}>
-        <div style={{marginBottom:8}}><BackBtn go={go} to="payouts"/></div>
+        <div style={{marginBottom:8}}><BackBtn goBack={goBack} go={go} to="payouts"/></div>
         <div style={{color:C.white,fontSize:20,fontWeight:700}}>{isEdit?"Edit Side Game":"New Side Game"}</div>
         <div style={{color:"rgba(255,255,255,.6)",fontSize:13,fontFamily:"Arial,sans-serif"}}>Set up a custom Nassau or Skins game — any players, any size.</div>
       </div>
@@ -3679,7 +3684,7 @@ function SideGameSetupScreen({go, activeTrip, tripPlayers, matches, editGame, pr
 }
 
 
-function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip, sideGames, onEditGame}){
+function PayoutsScreen({go, goBack, matches, ts, playerRecords, tripPlayers, activeTrip, sideGames, onEditGame}){
   const [tab, setTab] = useState("Side Games");
 
   const usingRealData = tripPlayers && tripPlayers.length > 0;
@@ -3768,7 +3773,7 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"14px 20px 18px"}}>
-        <div style={{marginBottom:8}}><BackBtn go={go} to="board"/></div>
+        <div style={{marginBottom:8}}><BackBtn goBack={goBack} go={go} to="board"/></div>
         <div style={{color:"rgba(255,255,255,.6)",fontSize:11,fontFamily:"Arial,sans-serif",letterSpacing:"1.2px",textTransform:"uppercase",marginBottom:3}}>{activeTrip?.name||"Sand Valley Ryder Cup"}</div>
         <div style={{color:C.white,fontSize:20,fontWeight:700}}>Payouts & Side Games</div>
       </div>
@@ -3928,7 +3933,7 @@ function PayoutsScreen({go, matches, ts, playerRecords, tripPlayers, activeTrip,
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
-function ProfileScreen({go, matches, playerRecords, onSignOut, session}){
+function ProfileScreen({go, goBack, matches, playerRecords, onSignOut, session}){
   const [tab,setTab]=useState("Trip");
   const [hcpSource,setHcpSource]=useState("ghin");
   const [manualIndex,setManualIndex]=useState("8.4");
@@ -3945,7 +3950,7 @@ function ProfileScreen({go, matches, playerRecords, onSignOut, session}){
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"14px 20px 20px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <BackBtn go={go} to="dashboard"/>
+          <BackBtn goBack={goBack} go={go} to="dashboard"/>
           <button onClick={()=>setEditMode(!editMode)} style={{background:editMode?"rgba(233,196,106,.25)":"rgba(255,255,255,.15)",border:editMode?`1px solid ${C.sand}`:"none",color:editMode?C.sand:C.white,borderRadius:8,padding:"5px 14px",fontSize:12,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:600}}>{editMode?"Save":"Edit"}</button>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:14}}>
@@ -4470,7 +4475,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 
 
 // ─── COURSE SETUP SCREEN ──────────────────────────────────────────────────────
-function CourseSetupScreen({go, activeTrip, onCourseAdded}){
+function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
   const [step,       setStep]      = useState(1);
   const [name,       setName]      = useState("");
   const [city,       setCity]      = useState("");
@@ -4626,7 +4631,7 @@ Rules:
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"16px 20px 20px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <BackBtn go={go} to="creatematch"/>
+          <BackBtn goBack={goBack} go={go} to="creatematch"/>
           <span style={{color:"rgba(255,255,255,.6)",fontSize:12,fontFamily:"Arial,sans-serif"}}>{step} of 2</span>
         </div>
         <div style={{color:C.white,fontSize:20,fontWeight:700}}>
@@ -4778,7 +4783,7 @@ Rules:
 }
 
 
-function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMatch, tripCourses, onCourseAdded}){
+function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated, editMatch, tripCourses, onCourseAdded}){
   const isEdit = !!editMatch;
 
   const displayPlayers = tripPlayers.length > 0
@@ -4913,7 +4918,7 @@ function CreateMatchScreen({go, activeTrip, tripPlayers, onMatchCreated, editMat
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"16px 20px 20px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <BackBtn go={go} to="trip"/>
+          <BackBtn goBack={goBack} go={go} to="trip"/>
           {isEdit&&<button onClick={()=>setConfirmDel(true)}
             style={{background:"rgba(220,38,38,.2)",border:"none",color:"#FCA5A5",borderRadius:8,
               padding:"5px 12px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
@@ -5386,7 +5391,8 @@ function TripSetupScreen({go, session, onTripCreated}){
 }
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App(){
-  const [screen,          setScreen]         = useState("login");
+  const [screen,          setScreenRaw]      = useState("login");
+  const [screenHistory,   setScreenHistory]  = useState([]); // stack of previous screens for accurate Back navigation
   const [selectedMatchId, setSelectedMatchId]= useState(null);
   const [matches,         setMatches]        = useState(INITIAL_MATCHES);
   const [session,         setSession]        = useState(null);
@@ -5398,8 +5404,34 @@ export default function App(){
   const [tripCourses,     setTripCourses]    = useState([]);
   const [sideGames,       setSideGames]      = useState([]);
   const [showQuickAdd,    setShowQuickAdd]   = useState(false);
-  const [editSideGame,    setEditSideGame]   = useState(null);
-  const [prefillRound,    setPrefillRound]   = useState(null); // matchId to pre-select when opening side game setup fresh
+  // setScreen pushes the CURRENT screen onto history before navigating, so Back
+  // always returns to wherever the person actually came from — not a hardcoded
+  // destination. Bottom-nav taps (dashboard/matches/board/trip/profile) reset
+  // history since those are top-level destinations, not a "drill in" action.
+  const TOP_LEVEL_SCREENS = ["dashboard","matches","board","trip","profile"];
+  const setScreen = (dest) => {
+    setScreenHistory(prev => {
+      if(TOP_LEVEL_SCREENS.includes(dest)) return []; // fresh start from a tab
+      if(screen === dest) return prev; // no-op navigation, don't push duplicate
+      return [...prev, screen];
+    });
+    setScreenRaw(dest);
+  };
+  const goBack = () => {
+    setScreenHistory(prev => {
+      if(prev.length === 0){ setScreenRaw("dashboard"); return []; }
+      const last = prev[prev.length-1];
+      setScreenRaw(last);
+      return prev.slice(0,-1);
+    });
+  };
+  // Bottom-nav taps always start a fresh history — these are top-level
+  // destinations, not a "drill in" action, so Back from here should go
+  // to Dashboard rather than wherever you happened to be navigating before.
+  const navigateTab = (dest) => {
+    setScreenHistory([]);
+    setScreenRaw(dest);
+  };
 
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
@@ -5592,20 +5624,20 @@ export default function App(){
             {screen==="login"       &&<LoginScreen        onAuth={handleAuth}/>}
             {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="matches"     &&<MatchesScreen      go={setScreen} {...matchProps}/>}
-            {screen==="live"        &&<LiveMatchScreen    go={setScreen} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames}
+            {screen==="live"        &&<LiveMatchScreen    go={setScreen} goBack={goBack} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames}
               onAddSideGame={mId=>{setEditSideGame(null);setPrefillRound(mId);}}
               onEditSideGameFromLive={g=>{setEditSideGame(g);setPrefillRound(null);}}
               {...matchProps}/>}
             {screen==="board"       &&<LeaderboardScreen  go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
-            {screen==="sidegames"   &&<SideGamesScreen    go={setScreen}/>}
+            {screen==="sidegames"   &&<SideGamesScreen    go={setScreen} goBack={goBack}/>}
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
-            {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
-            {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);setScreen("creatematch");}}/>}
+            {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
+            {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);setScreen("creatematch");}}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
-            {screen==="profile"     &&<ProfileScreen      go={setScreen} onSignOut={handleSignOut} session={session} {...matchProps}/>}
-            {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} matchId={selectedMatchId} {...matchProps}/>}
-            {screen==="payouts"     &&<PayoutsScreen      go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} onEditGame={g=>setEditSideGame(g)} {...matchProps}/>}
-            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} editGame={editSideGame} prefillRound={prefillRound}
+            {screen==="profile"     &&<ProfileScreen      go={setScreen} goBack={goBack} onSignOut={handleSignOut} session={session} {...matchProps}/>}
+            {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} goBack={goBack} matchId={selectedMatchId} {...matchProps}/>}
+            {screen==="payouts"     &&<PayoutsScreen      go={setScreen} goBack={goBack} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} onEditGame={g=>setEditSideGame(g)} {...matchProps}/>}
+            {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} goBack={goBack} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} editGame={editSideGame} prefillRound={prefillRound}
               onGameCreated={g=>{setSideGames(prev=>[...prev,g]);setPrefillRound(null);}}
               onGameUpdated={g=>{setSideGames(prev=>prev.map(sg=>sg.id===g.id?g:sg));setEditSideGame(null);}}
               onGameDeleted={id=>{setSideGames(prev=>prev.filter(sg=>sg.id!==id));setEditSideGame(null);}}/>}
@@ -5650,7 +5682,7 @@ export default function App(){
             </div>
           </div>
         )}
-        {showNav&&!tripLoading&&appReady&&<BottomNav screen={screen} set={setScreen} liveCount={matches.filter(m=>m.status==="live").length}/>}
+        {showNav&&!tripLoading&&appReady&&<BottomNav screen={screen} set={navigateTab} liveCount={matches.filter(m=>m.status==="live").length}/>}
       </div>
     </div>
   );
