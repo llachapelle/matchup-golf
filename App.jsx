@@ -2385,18 +2385,28 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     // Save to Supabase
     if(activeTrip && match.id && typeof match.id==="string" && match.id.length>10){
       try {
+        // UUID v4 shape check — player_id is a uuid column in Postgres, so we
+        // must NEVER send a non-UUID value (like "team_p1" for scramble, or a
+        // lowercase name for an unmatched guest) or the insert is rejected
+        // outright by Postgres. Those entries are simply skipped here; team
+        // scores and guest-only scoring still work via match.holeScores itself
+        // (used for in-app display) — only the per-player hole_scores table
+        // row requires a real trip_players UUID.
+        const isValidUUID = v => typeof v==="string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
         const holeRows = Object.entries(curScores)
           .filter(([,v])=>v&&parseInt(v)>0)
           .map(([key,gross])=>{
-            const tp=tripPlayers?.find(p=>p.name.toLowerCase()===key);
-            return {match_id:match.id, player_id:tp?.id||key, hole_number:holeNum, gross_score:parseInt(gross)};
-          });
+            const tp = tripPlayers?.find(p=>p.name.toLowerCase()===key);
+            return tp ? {match_id:match.id, player_id:tp.id, hole_number:holeNum, gross_score:parseInt(gross)} : null;
+          })
+          .filter(row => row && isValidUUID(row.player_id));
         if(holeRows.length>0){
-          await fetch(`${SUPA_URL}/rest/v1/hole_scores`,{
+          const res = await fetch(`${SUPA_URL}/rest/v1/hole_scores`,{
             method:"POST",
             headers:{...db.headers,"Prefer":"resolution=merge-duplicates"},
             body:JSON.stringify(holeRows),
           });
+          if(!res.ok) console.warn("hole_scores insert failed:", await res.text());
         }
         await db.patch("matches",`id=eq.${match.id}`,{
           thru:holeNum, live_score:newStatus.text, status:"live",
