@@ -774,21 +774,74 @@ function LoginScreen({onAuth}){
   const [name,    setName]    = useState("");
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState("");
+  const [joinStep, setJoinStep] = useState("code"); // "code" -> "account" once trip is found
+  const [foundTrip, setFoundTrip] = useState(null);
 
   const upd=(v,i)=>{const c=[...code];c[i]=v.slice(-1).toUpperCase();setCode(c);if(v&&i<5)document.getElementById(`ci${i+1}`)?.focus();};
   const kd=(e,i)=>{if(e.key==="Backspace"&&!code[i]&&i>0)document.getElementById(`ci${i-1}`)?.focus();};
   const joinCode = code.join("").toLowerCase();
 
-  const handleJoin = async () => {
+  // Step 1: validate the trip code exists, then ask for name + account so this
+  // person's scores/handicap link to a real, returning identity instead of a
+  // one-time guest session that forgets them the moment they close the app.
+  const handleJoinCodeSubmit = async () => {
     if(joinCode.length < 6){ setError("Enter all 6 digits"); return; }
     setLoading(true); setError("");
     try {
       const trips = await db.get("trips", `join_code=eq.${joinCode}&select=*`);
       if(!trips.length){ setError("Trip code not found. Check with your organizer."); setLoading(false); return; }
-      onAuth({ mode:"guest", trip: trips[0] });
+      setFoundTrip(trips[0]);
+      setJoinStep("account");
     } catch(e){ setError("Connection error. Try again."); }
     setLoading(false);
   };
+
+  // Step 2: create/sign in the account, link it to a trip_players row via user_id
+  // so future sign-ins automatically restore this person's real trip data.
+  const linkPlayerToUser = async (tripId, userId, playerName) => {
+    try {
+      const existing = await db.get("trip_players",
+        `trip_id=eq.${tripId}&name=eq.${encodeURIComponent(playerName)}&select=*`);
+      if(existing.length > 0){
+        // Player already exists on roster (added by organizer beforehand) — just link the account
+        await db.patch("trip_players", `id=eq.${existing[0].id}`, { user_id: userId });
+      } else {
+        // New player joining fresh — create their roster row linked to this account
+        await db.post("trip_players", [{
+          trip_id: tripId, user_id: userId, name: playerName, team: "red", is_guest: false,
+        }]);
+      }
+    } catch(e){ console.warn("Failed to link player to user:", e.message); }
+  };
+
+  const handleJoinFinish = async () => {
+    if(!name.trim()){ setError("Enter your name"); return; }
+    if(!email||!pw){ setError("Enter email and password"); return; }
+    setLoading(true); setError("");
+    try {
+      // Try sign up first; if email already registered, sign in instead
+      let res = await auth.signUp(email, pw, name.trim());
+      if(res.error && (res.error.message||"").toLowerCase().includes("already")){
+        res = await auth.signIn(email, pw);
+      }
+      if(res.error) throw new Error(res.error.message||res.error.msg||"Account error");
+      let session = res;
+      if(!session.access_token && (res.user||res.id)){
+        session = await auth.signIn(email, pw);
+      }
+      if(!session.access_token) throw new Error("Could not create or sign in to account");
+      await linkPlayerToUser(foundTrip.id, session.user.id, name.trim());
+      onAuth({ mode:"auth", session, trip: foundTrip });
+    } catch(e){ setError(e.message||"Failed to join"); }
+    setLoading(false);
+  };
+
+  // Skip account creation — join as a one-time guest (their data won't persist
+  // to a real account, matching the original behavior for casual one-off use)
+  const handleJoinAsGuest = () => {
+    onAuth({ mode:"guest", trip: foundTrip });
+  };
+
 
   const handleSignIn = async () => {
     if(!email||!pw){ setError("Enter email and password"); return; }
@@ -869,18 +922,44 @@ function LoginScreen({onAuth}){
       <div style={{flex:1,padding:"28px 24px",display:"flex",flexDirection:"column",gap:8}}>
         {error&&<div style={{background:C.redBg,color:C.red,padding:"10px 14px",borderRadius:10,fontSize:13,fontFamily:"Arial,sans-serif",marginBottom:4}}>{error}</div>}
 
-        {mode==="join"&&(<>
+        {mode==="join"&&joinStep==="code"&&(<>
           <div style={{fontSize:18,fontWeight:700,color:C.charcoal,marginBottom:4}}>Enter Trip Code</div>
           <div style={{fontSize:12,fontFamily:"Arial,sans-serif",color:C.gray,marginBottom:14}}>Get the 6-digit code from your trip organizer</div>
           <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:16}}>
             {code.map((c,i)=>(<input key={i} id={`ci${i}`} value={c} onChange={e=>upd(e.target.value,i)} onKeyDown={e=>kd(e,i)} maxLength={1}
               style={{width:44,height:52,border:`2px solid ${c?C.forest:C.light}`,borderRadius:12,textAlign:"center",fontSize:22,fontWeight:700,color:C.charcoal,background:c?C.mist:C.smoke,outline:"none",fontFamily:"Arial,sans-serif"}}/>))}
           </div>
-          <button onClick={handleJoin} disabled={loading} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.28)"})}>
-            {loading?"Joining…":"Join Trip →"}
+          <button onClick={handleJoinCodeSubmit} disabled={loading} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.28)"})}>
+            {loading?"Checking…":"Continue →"}
           </button>
           <div style={{textAlign:"center",marginTop:8,fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>
             Organizing a trip? <span onClick={()=>setMode("signup")} style={{color:C.forest,fontWeight:700,cursor:"pointer"}}>Create an account →</span>
+          </div>
+        </>)}
+
+        {mode==="join"&&joinStep==="account"&&(<>
+          <div style={{background:C.greenBg,borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16}}>✓</span>
+            <span style={{fontSize:13,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:600}}>Found "{foundTrip?.name}"</span>
+          </div>
+          <div style={{fontSize:18,fontWeight:700,color:C.charcoal,marginBottom:4}}>What's your name?</div>
+          <div style={{fontSize:12,fontFamily:"Arial,sans-serif",color:C.gray,marginBottom:14}}>Create a quick account so your scores and handicap follow you across devices and future trips.</div>
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name (as on the trip roster)"
+            style={{padding:"14px 16px",border:`1.5px solid ${C.light}`,borderRadius:12,fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",marginBottom:10}}/>
+          <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" type="email"
+            style={{padding:"14px 16px",border:`1.5px solid ${C.light}`,borderRadius:12,fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",marginBottom:10}}/>
+          <input value={pw} onChange={e=>setPw(e.target.value)} placeholder="Password" type="password"
+            style={{padding:"14px 16px",border:`1.5px solid ${C.light}`,borderRadius:12,fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",marginBottom:14}}/>
+          <button onClick={handleJoinFinish} disabled={loading} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.28)"})}>
+            {loading?"Joining…":"Create Account & Join →"}
+          </button>
+          <div style={{textAlign:"center",marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
+            <span onClick={handleJoinAsGuest} style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",cursor:"pointer",textDecoration:"underline"}}>
+              Just this once — continue as guest
+            </span>
+            <span onClick={()=>{setJoinStep("code");setError("");}} style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",cursor:"pointer"}}>
+              ← Back
+            </span>
           </div>
         </>)}
 
@@ -5633,9 +5712,24 @@ export default function App(){
           if(!isExpired && s.access_token && s.user?.id){
             setSession(s);
             try {
-              const trips = await db.get("trips",
+              // Find a trip this user is connected to — either one they organized,
+              // OR one they joined as a player via trip_players (most common case
+              // for non-organizer participants who joined with a trip code).
+              let trip = null;
+              const organized = await db.get("trips",
                 `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
-              if(trips.length > 0) await loadTrip(trips[0]);
+              if(organized.length > 0){
+                trip = organized[0];
+              } else {
+                const memberships = await db.get("trip_players",
+                  `user_id=eq.${s.user.id}&select=trip_id&order=created_at.desc&limit=1`);
+                if(memberships.length > 0){
+                  const joinedTrips = await db.get("trips",
+                    `id=eq.${memberships[0].trip_id}&status=eq.active&limit=1`);
+                  if(joinedTrips.length > 0) trip = joinedTrips[0];
+                }
+              }
+              if(trip) await loadTrip(trip);
               setScreen("dashboard");
             } catch(e){ setScreen("dashboard"); }
             setAppReady(true); return;
@@ -5660,9 +5754,22 @@ export default function App(){
       await loadTrip(trip);
     } else if(s?.user?.id){
       try {
-        const trips = await db.get("trips",
+        // Check trips this user organized first, then fall back to trips
+        // they joined as a player (most common path for non-organizers
+        // signing back in directly rather than via a fresh join code).
+        const organized = await db.get("trips",
           `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
-        if(trips.length > 0) await loadTrip(trips[0]);
+        if(organized.length > 0){
+          await loadTrip(organized[0]);
+        } else {
+          const memberships = await db.get("trip_players",
+            `user_id=eq.${s.user.id}&select=trip_id&order=created_at.desc&limit=1`);
+          if(memberships.length > 0){
+            const joinedTrips = await db.get("trips",
+              `id=eq.${memberships[0].trip_id}&status=eq.active&limit=1`);
+            if(joinedTrips.length > 0) await loadTrip(joinedTrips[0]);
+          }
+        }
       } catch(e){}
     }
     setScreen("dashboard");
