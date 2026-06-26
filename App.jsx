@@ -1,8 +1,14 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 const SUPA_URL = "https://woxocunvkxyuygytaskm.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndveG9jdW52a3h5dXlneXRhc2ttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0NDc2NDIsImV4cCI6MjA5NjAyMzY0Mn0.uS7lSXBA4L_Nm0BYYskkeqXmfxDA49ZceqXPd-eGbJ8";
+
+// Used ONLY for Realtime websocket subscriptions (live score sync across phones).
+// All normal reads/writes still go through the lightweight `db` REST helper below —
+// this keeps the rest of the app unchanged and only adds realtime on top.
+const supabase = createClient(SUPA_URL, SUPA_KEY);
 
 const db = {
   headers: { "Content-Type":"application/json", "apikey":SUPA_KEY, "Authorization":`Bearer ${SUPA_KEY}` },
@@ -2000,6 +2006,37 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     for(let h=1;h<=18;h++) out[h] = seed[h]?{...seed[h]}:{};
     return out;
   });
+
+  // Track which holes THIS device has already confirmed/submitted, so we know
+  // it's safe to merge in remote updates for other holes without ever
+  // overwriting scores someone is actively typing on this phone right now.
+  const confirmedHolesRef = useRef(new Set(Object.keys(match.holeScores||{}).map(Number)));
+  const [remoteUpdateBanner, setRemoteUpdateBanner] = useState(false);
+
+  // When another device saves a score (via Realtime), merge it in here —
+  // but only for holes this device hasn't already got data for, so a partner
+  // scoring hole 9 on their phone doesn't wipe out what you're mid-typing.
+  useEffect(() => {
+    const incoming = match.holeScores || {};
+    let changed = false;
+    setHoleScores(prev => {
+      const next = {...prev};
+      Object.entries(incoming).forEach(([h, scores])=>{
+        const hNum = Number(h);
+        const localHasData = Object.keys(prev[hNum]||{}).length > 0;
+        if(!localHasData && Object.keys(scores||{}).length > 0){
+          next[hNum] = {...scores};
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    if(changed){
+      setRemoteUpdateBanner(true);
+      setTimeout(()=>setRemoteUpdateBanner(false), 2500);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(match.holeScores)]);
   // Seed hole results from match data if thru > 0 using guest-aware net
   const [holeResults, setHoleResults] = useState(()=>{
     if(!match.thru || match.thru===0) return {};
@@ -2508,6 +2545,12 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       </div>
 
       <div style={{flex:1,padding:14,display:"flex",flexDirection:"column",gap:10,overflowY:"auto"}}>
+        {remoteUpdateBanner && (
+          <div style={{background:C.greenBg,border:`1px solid ${C.mint}`,borderRadius:10,padding:"8px 12px",display:"flex",alignItems:"center",gap:6}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/>
+            <span style={{fontSize:11,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:600}}>Synced new scores from another phone</span>
+          </div>
+        )}
         {/* Side games attached to this match — quick access to view/edit */}
         {(() => {
           // Show only side games that include at least one player from THIS match —
@@ -5514,9 +5557,69 @@ export default function App(){
     setTripLoading(false);
   }, []);
 
-  // ── On app start: restore session from localStorage ──────────────────────────
-  // Each user's session is stored under their own key so multiple users
-  // on the same device each have their own independent session.
+  // ── Realtime sync: live score updates appear on every connected phone ────────
+  // Subscribes to Postgres changes on `matches` (status/score/thru/live_score)
+  // and `hole_scores` (individual hole entries) for the active trip. When any
+  // other device saves a score, this merges the change into local state so
+  // everyone watching sees it update within ~1 second, no manual refresh needed.
+  useEffect(() => {
+    if(!activeTrip?.id) return;
+
+    const channel = supabase
+      .channel(`trip-${activeTrip.id}`)
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "matches", filter: `trip_id=eq.${activeTrip.id}` },
+        (payload) => {
+          const row = payload.new;
+          if(!row?.id) return;
+          setMatches(prev => {
+            const exists = prev.find(m => m.id === row.id);
+            if(!exists) return prev; // new match inserts are picked up via normal load flow
+            // Merge remote fields without clobbering local-only fields (like
+            // in-progress holeScores edits not yet saved by THIS device)
+            return prev.map(m => m.id === row.id ? {
+              ...m,
+              status:       row.status      ?? m.status,
+              thru:         row.thru        ?? m.thru,
+              liveScore:    row.live_score  ?? m.liveScore,
+              winnerSide:   row.winner_side ?? m.winnerSide,
+              score:        row.score       ?? m.score,
+              format:       row.format      ?? m.format,
+              course_name:  row.course_name ?? m.course_name,
+              tee_name:     row.tee_name    ?? m.tee_name,
+              bankedScores: row.banked_scores ? (typeof row.banked_scores==="string"?JSON.parse(row.banked_scores):row.banked_scores) : m.bankedScores,
+            } : m);
+          });
+        }
+      )
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "hole_scores" },
+        (payload) => {
+          const row = payload.new;
+          if(!row?.match_id) return;
+          setMatches(prev => {
+            const exists = prev.find(m => m.id === row.match_id);
+            if(!exists) return prev;
+            return prev.map(m => {
+              if(m.id !== row.match_id) return m;
+              // Find which player key this player_id corresponds to
+              const tp = tripPlayers.find(p => p.id === row.player_id);
+              const key = tp ? tp.name.toLowerCase() : row.player_id;
+              const newHoleScores = {
+                ...m.holeScores,
+                [row.hole_number]: { ...(m.holeScores?.[row.hole_number]||{}), [key]: row.gross_score },
+              };
+              return { ...m, holeScores: newHoleScores };
+            });
+          });
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeTrip?.id, tripPlayers]);
+
+
   // If no valid session is found, the login screen is always shown.
   useEffect(()=>{
     const restore = async () => {
