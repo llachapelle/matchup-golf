@@ -2532,8 +2532,8 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                 );
               })}
               <button onClick={()=>{
-                  onAddSideGame && onAddSideGame(match.id);
-                  go("sidegamesetup");
+                  try { onAddSideGame && onAddSideGame(match.id); } catch(e){ alert("onAddSideGame error: "+e.message); }
+                  try { go("sidegamesetup"); } catch(e){ alert("go error: "+e.message); }
                 }}
                 style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:C.white,border:`1.5px dashed ${C.mint}`,borderRadius:20,padding:"6px 12px",cursor:"pointer"}}>
                 <span style={{fontSize:13,color:C.forest}}>+</span>
