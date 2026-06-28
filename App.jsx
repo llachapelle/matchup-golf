@@ -264,18 +264,33 @@ const INITIAL_MATCHES = [
 ];
 
 // ── Pure derive functions — accept a matches array, return computed values ─────
-function matchWinningTeam(m) {
+// Resolves a player key's team (red/blue) by checking the REAL trip roster
+// first — this is the single source of truth set during trip setup. Falls
+// back to the RAW demo roster only when no real tripPlayers data exists.
+// Every team lookup throughout the app should go through this function;
+// looking up team via RAW alone silently breaks for any real trip player
+// who isn't part of the hardcoded demo cast, causing wrong team displays
+// and incorrect match results (since the winner's team gets derived wrong).
+const resolvePlayerTeam = (key, tripPlayers) => {
+  const tp = tripPlayers?.find(p => p.name.toLowerCase() === key);
+  if(tp?.team) return tp.team;
+  const raw = RAW.find(p => p.key === key);
+  if(raw?.team) return raw.team;
+  return null; // unresolved — caller decides the fallback default
+};
+
+function matchWinningTeam(m, tripPlayers) {
   if(!m.winnerSide || m.winnerSide==="halve") return m.winnerSide==="halve"?"halve":null;
   const winnerKeys = m.winnerSide==="p1" ? m.p1Keys : m.p2Keys;
-  const redCount  = winnerKeys.filter(k=>RAW.find(p=>p.key===k)?.team==="red").length;
-  const blueCount = winnerKeys.filter(k=>RAW.find(p=>p.key===k)?.team==="blue").length;
+  const redCount  = (winnerKeys||[]).filter(k=>resolvePlayerTeam(k,tripPlayers)==="red").length;
+  const blueCount = (winnerKeys||[]).filter(k=>resolvePlayerTeam(k,tripPlayers)==="blue").length;
   return redCount >= blueCount ? "red" : "blue";
 }
 
-function deriveTeamScores(matches) {
+function deriveTeamScores(matches, tripPlayers) {
   let red=0, blue=0, redW=0, blueW=0, halves=0;
   matches.filter(m=>m.status==="completed").forEach(m=>{
-    const wt = matchWinningTeam(m);
+    const wt = matchWinningTeam(m, tripPlayers);
     if(wt==="red")  { red+=1;   redW++; }
     if(wt==="blue") { blue+=1;  blueW++; }
     if(wt==="halve"){ red+=0.5; blue+=0.5; halves++; }
@@ -1041,9 +1056,9 @@ const isXBallFormat = m => {
 // For 20 Ball / 40 Ball matches: shows banked count AND net score-to-par per
 // side on the Matches/Dashboard tabs, matching what's shown inside the live
 // scoring screen itself.
-const getXBallDisplay = (m) => {
-  const p1Team = (m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "red";
-  const p2Team = (m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "blue";
+const getXBallDisplay = (m, tripPlayers) => {
+  const p1Team = (m.p1Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "red";
+  const p2Team = (m.p2Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "blue";
   const p1Label = `Team ${p1Team==="red"?"Red":"Blue"}`;
   const p2Label = `Team ${p2Team==="red"?"Red":"Blue"}`;
   const target = (m.format||"").toLowerCase().includes("40") ? 40 : 20;
@@ -1091,9 +1106,9 @@ const getXBallDisplay = (m) => {
   };
 };
 
-const getScrambleDisplay = (m) => {
-  const p1Team = (m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "red";
-  const p2Team = (m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean) || "blue";
+const getScrambleDisplay = (m, tripPlayers) => {
+  const p1Team = (m.p1Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "red";
+  const p2Team = (m.p2Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "blue";
   const p1Label = `Team ${p1Team==="red"?"Red":"Blue"}`;
   const p2Label = `Team ${p2Team==="red"?"Red":"Blue"}`;
 
@@ -1153,7 +1168,7 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
             const isXB  = isXBallFormat(m);
 
             if(isXB){
-              const xd = getXBallDisplay(m);
+              const xd = getXBallDisplay(m, tripPlayers);
               return(
                 <div key={m.id} onClick={()=>goMatch(m.id,"live")} style={{...card({marginBottom:8,cursor:"pointer",border:`1.5px solid ${C.mint}`})}}>
                   <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE · {xd.target} BALL</span></div>
@@ -1174,7 +1189,7 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
             }
 
             if(isScr){
-              const sd = getScrambleDisplay(m);
+              const sd = getScrambleDisplay(m, tripPlayers);
               return(
                 <div key={m.id} onClick={()=>goMatch(m.id,"live")} style={{...card({marginBottom:8,cursor:"pointer",border:`1.5px solid ${C.mint}`})}}>
                   <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE · SCRAMBLE</span></div>
@@ -1196,8 +1211,8 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
               );
             }
 
-            const p1Team=(m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean)||"red";
-            const p2Team=(m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean)||"blue";
+            const p1Team=(m.p1Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean)||"red";
+            const p2Team=(m.p2Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean)||"blue";
             const isSquare=!m.liveScore||m.liveScore.toLowerCase().includes("square");
             let topSide="p1";
             if(m.liveScore&&!isSquare){
@@ -1343,9 +1358,9 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
               // Simpler: top is always the better side for completed/live
               const isHalve = m.winnerSide==="halve";
               const isScr = isScrambleFormat(m);
-              const scrDisplay = isScr ? getScrambleDisplay(m) : null;
+              const scrDisplay = isScr ? getScrambleDisplay(m, tripPlayers) : null;
               const isXB = isXBallFormat(m);
-              const xbDisplay = isXB ? getXBallDisplay(m) : null;
+              const xbDisplay = isXB ? getXBallDisplay(m, tripPlayers) : null;
 
               return(
                 <div key={m.id} style={{...card({marginBottom:8,border:
@@ -1448,7 +1463,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
                       </>}
                       {m.status==="upcoming"&&<div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>⏰ {m.time}</div>}
                       {m.status==="completed"&&(()=>{
-                        const wt=matchWinningTeam(m);
+                        const wt=matchWinningTeam(m, tripPlayers);
                         const isHalve=wt==="halve"||m.winnerSide==="halve";
                         const winColor=wt==="red"?C.red:wt==="blue"?C.blue:C.slate;
                         const winLabel=isHalve?"All Square":`${wt==="red"?"Red":"Blue"} wins ${m.score}`;
@@ -1471,7 +1486,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
                     const pByKey=Object.fromEntries(builtP.map(p=>[p.key,p]));
                     const hs=m.holeScores||{};
                     const allHoles=Array.from({length:18},(_,i)=>i+1).filter(h=>hs[h]&&Object.keys(hs[h]).length>0);
-                    const wt=matchWinningTeam(m);
+                    const wt=matchWinningTeam(m, tripPlayers);
                     return(
                       <div style={{borderTop:`1px solid ${C.mist}`,marginTop:10,paddingTop:10}}>
                         {/* Match info + edit */}
@@ -1619,7 +1634,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
                                 const p1best=Math.min(...(m.p1Keys||[]).map(k=>{const p=pByKey[k];const g=parseInt(hs[h]?.[k]);return(!p||isNaN(g))?Infinity:g-sOnHole(p.ms,si2);}));
                                 const p2best=Math.min(...(m.p2Keys||[]).map(k=>{const p=pByKey[k];const g=parseInt(hs[h]?.[k]);return(!p||isNaN(g))?Infinity:g-sOnHole(p.ms,si2);}));
                                 const res=p1best<p2best?"p1":p2best<p1best?"p2":"tie";
-                                const wt2=res==="p1"?matchWinningTeam({...m,winnerSide:"p1"}):res==="p2"?matchWinningTeam({...m,winnerSide:"p2"}):"tie";
+                                const wt2=res==="p1"?matchWinningTeam({...m,winnerSide:"p1"},tripPlayers):res==="p2"?matchWinningTeam({...m,winnerSide:"p2"},tripPlayers):"tie";
                                 const bg=wt2==="red"?C.redBg:wt2==="blue"?C.blueBg:C.mist;
                                 const col=wt2==="red"?C.red:wt2==="blue"?C.blue:C.gray;
                                 return(
@@ -1646,7 +1661,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
 }
 
 // ─── MATCH EDIT SCREEN ────────────────────────────────────────────────────────
-function MatchEditScreen({go, goBack, matchId, matches, updateMatch}){
+function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers}){
   const match  = matches.find(m=>m.id===matchId && m.status==="completed")
               || matches.find(m=>m.status==="completed")
               || matches[0];
@@ -1771,6 +1786,16 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch}){
   // Compute proper match play result — only from holes with scores
   // Returns the result as the match would stand at that point
   const computeMatchScore = () => {
+    // For a COMPLETED match, the result was already locked in and saved the
+    // moment the match finished (see finishMatch / the "decidedAt" freeze
+    // logic in LiveMatchScreen). Re-deriving it here from current hole data
+    // is exactly what caused completed matches to show a different, wrong
+    // result on revisit (e.g. "1&0" instead of the real "2&1") — so for any
+    // completed match we simply trust what was saved, never recompute.
+    if(match.status==="completed" && match.score){
+      return {winnerSide: match.winnerSide, text: match.score};
+    }
+
     let p1=0, p2=0, tied=0;
     let closedAt = null;
     for(let h=1;h<=18;h++){
@@ -1814,8 +1839,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch}){
 
   const matchScore  = computeMatchScore();
   const winTeam     = matchScore.winnerSide==="halve" ? null
-    : matchScore.winnerSide==="p1" ? matchWinningTeam({...match,winnerSide:"p1"})
-    : matchWinningTeam({...match,winnerSide:"p2"});
+    : matchScore.winnerSide==="p1" ? matchWinningTeam({...match,winnerSide:"p1"},tripPlayers)
+    : matchWinningTeam({...match,winnerSide:"p2"},tripPlayers);
   const resultColor = winTeam==="red"?C.sand:winTeam==="blue"?"#85C1E9":"rgba(255,255,255,.85)";
 
   // Side team colors — derived from actual players, not hardcoded
@@ -2024,8 +2049,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch}){
                     <div style={{width:46,fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",flexShrink:0}}>Result</div>
                     {holes.map(h=>{
                       const res=holeResult(h);
-                      const wt = res==="p1"?matchWinningTeam({...match,winnerSide:"p1"})
-                               : res==="p2"?matchWinningTeam({...match,winnerSide:"p2"})
+                      const wt = res==="p1"?matchWinningTeam({...match,winnerSide:"p1"},tripPlayers)
+                               : res==="p2"?matchWinningTeam({...match,winnerSide:"p2"},tripPlayers)
                                : res==="tie"?"tie":null;
                       return(
                         <div key={h} style={{flex:1,height:16,borderRadius:4,
@@ -2074,8 +2099,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch}){
                 {Array.from({length:18},(_,i)=>i+1).map(h=>{
                   const res = holeResult(h);
                   const isOverridden = holeOverrides[h]!==undefined;
-                  const wt = res==="p1"?matchWinningTeam({...match,winnerSide:"p1"})
-                           : res==="p2"?matchWinningTeam({...match,winnerSide:"p2"})
+                  const wt = res==="p1"?matchWinningTeam({...match,winnerSide:"p1"},tripPlayers)
+                           : res==="p2"?matchWinningTeam({...match,winnerSide:"p2"},tripPlayers)
                            : res==="tie"?"tie":null;
                   return(
                     <div key={h} onClick={()=>{
@@ -3242,7 +3267,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                     <div style={{width:46,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",flexShrink:0}}>Result</div>
                     {playedHoles.map(h=>{
                       const res=holeResults[h];
-                      const wt=res==="p1"?matchWinningTeam({...match,winnerSide:"p1"}):res==="p2"?matchWinningTeam({...match,winnerSide:"p2"}):"tie";
+                      const wt=res==="p1"?matchWinningTeam({...match,winnerSide:"p1"},tripPlayers):res==="p2"?matchWinningTeam({...match,winnerSide:"p2"},tripPlayers):"tie";
                       const bg=wt==="red"?C.redBg:wt==="blue"?C.blueBg:C.mist;
                       const col=wt==="red"?C.red:wt==="blue"?C.blue:C.gray;
                       return(
@@ -5887,7 +5912,7 @@ export default function App(){
   const updateMatch = (id, changes) =>
     setMatches(prev => prev.map(m => m.id===id ? {...m, ...changes} : m));
 
-  const ts            = useMemo(()=>deriveTeamScores(matches),    [matches]);
+  const ts            = useMemo(()=>deriveTeamScores(matches, tripPlayers),    [matches, tripPlayers]);
   const playerRecords = useMemo(()=>derivePlayerRecords(matches), [matches]);
 
   const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup","payouts","sidegamesetup"];
@@ -6201,7 +6226,7 @@ export default function App(){
     });
   }, []);
 
-  const matchProps = { matches, ts, playerRecords, updateMatch, goMatch };
+  const matchProps = { matches, ts, playerRecords, updateMatch, goMatch, tripPlayers };
 
   return(
     <div style={{fontFamily:"Georgia,serif",background:C.cream,minHeight:"100vh",display:"flex",justifyContent:"center",alignItems:"flex-start",padding:"20px 16px 40px"}}>
