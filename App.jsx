@@ -101,6 +101,7 @@ const C = {
   white:"#FFFFFF", smoke:"#F8F9FA",
   charcoal:"#1C1C1E", slate:"#3A3A3C", gray:"#8E8E93", light:"#D1D5DB",
   red:"#C0392B", redBg:"#FADBD8", blue:"#1A5276", blueBg:"#D6EAF8",
+  redBright:"#F1948A", blueBright:"#7FB3D5", // brighter than *Bg, more visible in direct sunlight, used for quick-glance indicators like hole-result dots
   green:"#27AE60", greenBg:"#D5F5E3", amber:"#E67E22", amberBg:"#FDEBD0",
 };
 
@@ -2708,19 +2709,37 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
             <div style={{fontSize:13,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:6}}>{match.p1} vs {match.p2}</div>
           </div>
           {/* Full hole-by-hole scorecard — every player's score per hole,
-              with the winning player(s)' score highlighted in their actual
-              team color (not a hardcoded p1=red/p2=blue assumption). */}
+              with PAR/YARDAGE shown like a real scorecard, and only the
+              individual player whose score actually won the hole highlighted
+              (not their whole side) in their team's color. */}
           <div style={card()}>
             <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Scorecard</div>
             <div style={{overflowX:"auto"}}>
               <div style={{minWidth:18*26+50}}>
                 {/* Hole number header row */}
-                <div style={{display:"flex",gap:2,marginBottom:4}}>
+                <div style={{display:"flex",gap:2,marginBottom:2}}>
                   <div style={{width:60,flexShrink:0}}/>
                   {Array.from({length:18},(_,i)=>i+1).map(h=>(
                     <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>
                   ))}
                 </div>
+                {/* Par row */}
+                <div style={{display:"flex",gap:2,marginBottom:1}}>
+                  <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Par</div>
+                  {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                    <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{course.pars[h-1]}</div>
+                  ))}
+                </div>
+                {/* Yardage row */}
+                {course.yardages&&(
+                  <div style={{display:"flex",gap:2,marginBottom:6}}>
+                    <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Yards</div>
+                    {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                      <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{course.yardages[h-1]||"—"}</div>
+                    ))}
+                  </div>
+                )}
+                {!course.yardages&&<div style={{marginBottom:6}}/>}
                 {/* Per-player rows */}
                 {[...p1Players,...p2Players].map((p,pi)=>{
                   const isExt = p.isExternal;
@@ -2735,14 +2754,25 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                         const gross = parseInt(holeScores[h]?.[p.key]);
                         const hasScore = !isNaN(gross) && gross>0;
                         const res = holeResults[h];
-                        // Did THIS player's side win this hole? Highlight only
-                        // if their side won (not just any score being entered).
-                        const sideWonHole = (res==="p1"&&pi<p1Players.length) || (res==="p2"&&pi>=p1Players.length);
-                        const bg = sideWonHole ? (sideTeam==="red"?C.redBg:C.blueBg) : C.smoke;
-                        const col = sideWonHole ? sideColor : C.charcoal;
+                        const onWinningSide = (res==="p1"&&pi<p1Players.length) || (res==="p2"&&pi>=p1Players.length);
+                        // Among players on the winning side, find who actually
+                        // had the best net score this hole — only THAT player
+                        // gets highlighted, not their whole side.
+                        let isBestOnSide = false;
+                        if(onWinningSide && hasScore){
+                          const sideKeys = pi<p1Players.length
+                            ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(x=>x.key)]
+                            : [...(match.p2Keys||[]), ...p2ExtPlayers.map(x=>x.key)];
+                          const scoresThisHole = holeScores[h]||{};
+                          const nets = sideKeys.map(k=>({key:k, net:getNetLive(k, scoresThisHole, h)}));
+                          const bestNet = Math.min(...nets.map(n=>n.net));
+                          isBestOnSide = nets.find(n=>n.key===p.key)?.net === bestNet;
+                        }
+                        const bg = isBestOnSide ? (sideTeam==="red"?C.redBg:C.blueBg) : C.smoke;
+                        const col = isBestOnSide ? sideColor : C.charcoal;
                         return(
                           <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                            <span style={{fontSize:10,fontWeight:sideWonHole?700:500,color:hasScore?col:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
+                            <span style={{fontSize:10,fontWeight:isBestOnSide?700:500,color:hasScore?col:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
                           </div>
                         );
                       })}
@@ -2889,12 +2919,13 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
         {Array.from({length:18},(_,i)=>i+1).map(h=>{
           const res=holeResults[h], cur=h===holeNum;
           const showResultColor = !isScramble && !isXBall; // match-play only
-          const winColor = res==="p1" ? (p1Team==="red"?C.redBg:C.blueBg)
-                         : res==="p2" ? (p2Team==="red"?C.redBg:C.blueBg)
-                         : res==="tie" ? C.mist : "transparent";
+          const winColor = res==="p1" ? (p1Team==="red"?C.redBright:C.blueBright)
+                         : res==="p2" ? (p2Team==="red"?C.redBright:C.blueBright)
+                         : res==="tie" ? C.light : "transparent";
           const bg = cur ? C.sand : (showResultColor ? winColor : "transparent");
+          const textCol = cur ? C.charcoal : (showResultColor && res && res!=="tie") ? C.white : C.gray;
           return(
-            <div key={h} onClick={()=>setHoleNum(h)} style={{width:16,height:16,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,fontFamily:"Arial,sans-serif",background:bg,border:cur?`2px solid ${C.sand}`:`1.5px solid ${(showResultColor&&res)?"transparent":C.light}`,color:cur?C.charcoal:C.gray}}>
+            <div key={h} onClick={()=>setHoleNum(h)} style={{width:16,height:16,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,fontFamily:"Arial,sans-serif",background:bg,border:cur?`2px solid ${C.sand}`:`1.5px solid ${(showResultColor&&res)?"transparent":C.light}`,color:textCol}}>
               {h}
             </div>
           );
