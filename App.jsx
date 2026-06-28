@@ -1506,7 +1506,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
                           {label:m.p2,keys:m.p2Keys||[],pairingStr:m.p2,isWinner:m.winnerSide==="p2"}]
                           .sort((a,b)=>b.isWinner-a.isWinner) // winner always on top
                           .map(side=>{
-                          const teamCol=side.keys.length&&RAW.find(p=>p.key===side.keys[0])?.team==="red"?C.red:C.blue;
+                          const teamCol=side.keys.length&&resolvePlayerTeam(side.keys[0],tripPlayers)==="red"?C.red:C.blue;
                           const rawKeys = side.keys;
                           const rawNames = rawKeys.map(k=>RAW.find(p=>p.key===k)?.name||"");
                           const extNames = side.pairingStr.split("/").map(n=>n.trim())
@@ -1537,11 +1537,11 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers}){
                                 const hasHcp     = !!builtPlayer || !!guestPlayer; // has handicap data
                                 const displayName= rawPlayer?.name||(key.charAt(0).toUpperCase()+key.slice(1));
 
-                                // Determine this player's actual team color
-                                // RAW players: use their team field
-                                // Guests: inherit from their side's RAW teammates
-                                const playerTeam = rawPlayer?.team || (side.keys.length
-                                  ? RAW.find(p=>p.key===side.keys[0])?.team
+                                // Determine this player's actual team color from the
+                                // real trip roster first, falling back to inheriting
+                                // from a RAW teammate on the same side only in demo mode.
+                                const playerTeam = resolvePlayerTeam(key, tripPlayers) || (side.keys.length
+                                  ? resolvePlayerTeam(side.keys[0], tripPlayers)
                                   : null);
                                 const playerColor = playerTeam==="red" ? C.red : playerTeam==="blue" ? C.blue : C.gray;
 
@@ -2926,6 +2926,36 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
               <div>
                 <div style={{fontSize:11,color:"rgba(255,255,255,.55)",fontFamily:"Arial,sans-serif"}}>Team {p2Team==="red"?"Red":"Blue"}{h2>0?` · thru ${h2}`:""}</div>
                 <div style={{fontSize:20,fontWeight:700,color:tc2}}>{fmt(t2,h2)}</div>
+              </div>
+            </div>
+          );
+        })():isXBall?(()=>{
+          // X-Ball (20/40 Ball): net score-to-par is the headline number,
+          // matching the clean, simple style used elsewhere — banked count
+          // shown smaller alongside it rather than as the primary figure.
+          const p1Keys=[...(match.p1Keys||[]),...p1ExtPlayers.map(p=>p.key)];
+          const p2Keys=[...(match.p2Keys||[]),...p2ExtPlayers.map(p=>p.key)];
+          const p1Banked=bankedCountForSide(p1Keys), p2Banked=bankedCountForSide(p2Keys);
+          const p1Net=bankedNetTotalForSide(p1Keys), p2Net=bankedNetTotalForSide(p2Keys);
+          const fmtNet = n => n===0?"E":n>0?`+${n}`:`${n}`;
+          const tc1=p1Team==="red"?C.sand:"#93C5FD";
+          const tc2=p2Team==="red"?C.sand:"#93C5FD";
+          return(
+            <div style={{display:"flex",gap:16,marginTop:8}}>
+              <div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.55)",fontFamily:"Arial,sans-serif"}}>Team {p1Team==="red"?"Red":"Blue"}</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <span style={{fontSize:20,fontWeight:700,color:tc1}}>{p1Banked>0?fmtNet(p1Net):"—"}</span>
+                  <span style={{fontSize:11,color:"rgba(255,255,255,.5)",fontFamily:"Arial,sans-serif"}}>{p1Banked}/{xBallTarget}</span>
+                </div>
+              </div>
+              <div style={{width:1,background:"rgba(255,255,255,.2)"}}/>
+              <div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.55)",fontFamily:"Arial,sans-serif"}}>Team {p2Team==="red"?"Red":"Blue"}</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <span style={{fontSize:20,fontWeight:700,color:tc2}}>{p2Banked>0?fmtNet(p2Net):"—"}</span>
+                  <span style={{fontSize:11,color:"rgba(255,255,255,.5)",fontFamily:"Arial,sans-serif"}}>{p2Banked}/{xBallTarget}</span>
+                </div>
               </div>
             </div>
           );
