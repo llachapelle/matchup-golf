@@ -731,7 +731,6 @@ function BottomNav({screen,set,liveCount=0}){
   const items=[
     {id:"dashboard",icon:"🏠",label:"Home"},
     {id:"matches",  icon:"🏌️",label:"Matches",badge:liveCount},
-    {id:"scorepicker",icon:"✏️", label:"Score"},
     {id:"board",    icon:"📊",label:"Board"},
     {id:"trip",     icon:"🗓️",label:"Trip"},
     {id:"profile",  icon:"👤",label:"Profile"},
@@ -2166,81 +2165,6 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
 
 
 // ─── LIVE MATCH ───────────────────────────────────────────────────────────────
-// ─── SCORE PICKER SCREEN ──────────────────────────────────────────────────────
-// The "Score" tab in the bottom nav previously jumped straight into whichever
-// live match happened to be found first — confusing if you're not actually
-// in that match. This screen instead lists every live and upcoming match so
-// you can pick the right one before entering scores.
-function ScorePickerScreen({go, goMatch, matches, tripPlayers}){
-  const live     = matches.filter(m=>m.status==="live");
-  const upcoming = matches.filter(m=>m.status==="upcoming");
-
-  const teamLine = (m) => {
-    const isScr = isScrambleFormat(m);
-    const isXB  = isXBallFormat(m);
-    if(isScr || isXB){
-      const names1 = (m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ");
-      const names2 = (m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ");
-      return `${names1} vs ${names2}`;
-    }
-    return `${m.p1} vs ${m.p2}`;
-  };
-
-  return(
-    <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
-      <Header sub="⛳ MatchUp Golf" title="Score a Match" detail="Pick a match to enter scores" onProfile={()=>go("profile")}/>
-      <div style={{flex:1,padding:"18px 16px",display:"flex",flexDirection:"column",gap:18,overflowY:"auto"}}>
-
-        {live.length===0 && upcoming.length===0 && (
-          <div style={{...card({textAlign:"center",padding:"32px 16px"})}}>
-            <div style={{fontSize:28,marginBottom:8}}>⛳</div>
-            <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>No matches to score yet</div>
-            <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:4}}>Create a match from the + button to get started.</div>
-          </div>
-        )}
-
-        {live.length>0 && (
-          <div>
-            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10,padding:"0 2px"}}>🔴 Live Now</div>
-            {live.map(m=>(
-              <button key={m.id} onClick={()=>goMatch(m.id,"live")}
-                style={{width:"100%",textAlign:"left",background:C.white,border:`1.5px solid ${C.mint}`,borderRadius:14,
-                  padding:"13px 15px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/>
-                    <span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE</span>
-                  </div>
-                  <div style={{fontSize:13,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{teamLine(m)}</div>
-                  <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>{m.format}{m.course_name?` · ${m.course_name}`:""}</div>
-                </div>
-                <div style={{background:C.forest,color:C.white,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",flexShrink:0}}>Score →</div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {upcoming.length>0 && (
-          <div>
-            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10,padding:"0 2px"}}>⏰ Upcoming</div>
-            {upcoming.map(m=>(
-              <button key={m.id} onClick={()=>goMatch(m.id,"live")}
-                style={{width:"100%",textAlign:"left",background:C.white,border:`1px solid ${C.light}`,borderRadius:14,
-                  padding:"13px 15px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{teamLine(m)}</div>
-                  <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>{m.format}{m.course_name?` · ${m.course_name}`:""}</div>
-                </div>
-                <div style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",flexShrink:0}}>Start →</div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tripPlayers, activeTrip, sideGames, onAddSideGame, onEditSideGameFromLive}){
   // effectiveMatch: auto-starts upcoming matches as live when scorer taps in
   const rawMatch = matches.find(m=>m.id===matchId)
@@ -5982,7 +5906,7 @@ export default function App(){
   // always returns to wherever the person actually came from — not a hardcoded
   // destination. Bottom-nav taps (dashboard/matches/board/trip/profile) reset
   // history since those are top-level destinations, not a "drill in" action.
-  const TOP_LEVEL_SCREENS = ["dashboard","matches","board","trip","profile","scorepicker"];
+  const TOP_LEVEL_SCREENS = ["dashboard","matches","board","trip","profile"];
   const setScreen = (dest) => {
     setScreenHistory(prev => {
       if(TOP_LEVEL_SCREENS.includes(dest)) return []; // fresh start from a tab
@@ -6013,7 +5937,7 @@ export default function App(){
   const ts            = useMemo(()=>deriveTeamScores(matches, tripPlayers),    [matches, tripPlayers]);
   const playerRecords = useMemo(()=>derivePlayerRecords(matches), [matches]);
 
-  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup","payouts","sidegamesetup","scorepicker"];
+  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup","payouts","sidegamesetup"];
   const showNav    = navScreens.includes(screen);
   const goMatch = (matchId, dest) => {
     setSelectedMatchId(matchId);
@@ -6350,7 +6274,6 @@ export default function App(){
             {screen==="login"       &&<LoginScreen        onAuth={handleAuth}/>}
             {screen==="dashboard"   &&<DashboardScreen    go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} {...matchProps}/>}
             {screen==="matches"     &&<MatchesScreen      go={setScreen} tripPlayers={tripPlayers} {...matchProps}/>}
-            {screen==="scorepicker" &&<ScorePickerScreen   go={setScreen} tripPlayers={tripPlayers} {...matchProps}/>}
             {screen==="live"        &&<LiveMatchScreen    go={setScreen} goBack={goBack} goMatch={goMatch} matchId={selectedMatchId} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames}
               onAddSideGame={mId=>{setEditSideGame(null);setPrefillRound(mId);}}
               onEditSideGameFromLive={g=>{setEditSideGame(g);setPrefillRound(null);}}
