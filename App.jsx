@@ -2606,12 +2606,14 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
         await db.patch("matches",`id=eq.${match.id}`,{
           thru:holeNum, live_score:newStatus.text, status:"live",
           banked_scores: isXBall ? JSON.stringify(bankedScores) : undefined,
-          // Scramble/Alt Shot use "team_p1"/"team_p2" keys, and X-Ball banking
-          // needs every individual hole score preserved — neither maps cleanly
-          // to the per-player hole_scores table (which requires a real player
-          // UUID), so for these formats the full score map is saved directly
-          // on the match row and read back from there on reload instead.
-          score_data: (isTeamScoreFormat || isXBall) ? JSON.stringify(newHoleScores) : undefined,
+          // score_data is now saved as a universal backup of the full hole-by-hole
+          // map for EVERY format — not just Scramble/X-Ball. The per-player
+          // hole_scores table remains the source for cross-match side games
+          // (Nassau/Skins), but any player who couldn't be matched to a real
+          // UUID (e.g. an unlinked guest) would otherwise have their scores
+          // silently dropped on reload. Saving the complete map here guarantees
+          // nothing is ever lost, regardless of format or player type.
+          score_data: JSON.stringify(newHoleScores),
         });
       } catch(e){console.warn("Failed to save hole:",e.message);}
     }
@@ -2705,15 +2707,49 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
             <div style={{fontSize:22,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif"}}>{s.text}</div>
             <div style={{fontSize:13,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:6}}>{match.p1} vs {match.p2}</div>
           </div>
+          {/* Full hole-by-hole scorecard — every player's score per hole,
+              with the winning player(s)' score highlighted in their actual
+              team color (not a hardcoded p1=red/p2=blue assumption). */}
           <div style={card()}>
-            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Hole Results</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {Array.from({length:18},(_,i)=>i+1).map(h=>{
-                const res=holeResults[h];
-                const bg = res==="p1"?C.redBg:res==="p2"?C.blueBg:res==="tie"?C.mist:C.smoke;
-                const col= res==="p1"?C.red:res==="p2"?C.blue:C.gray;
-                return(<div key={h} style={{width:32,height:32,borderRadius:8,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:col,fontFamily:"Arial,sans-serif",border:`1px solid ${C.light}`}}>{h}</div>);
-              })}
+            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Scorecard</div>
+            <div style={{overflowX:"auto"}}>
+              <div style={{minWidth:18*26+50}}>
+                {/* Hole number header row */}
+                <div style={{display:"flex",gap:2,marginBottom:4}}>
+                  <div style={{width:60,flexShrink:0}}/>
+                  {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                    <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>
+                  ))}
+                </div>
+                {/* Per-player rows */}
+                {[...p1Players,...p2Players].map((p,pi)=>{
+                  const isExt = p.isExternal;
+                  const sideTeam = pi<p1Players.length ? p1Team : p2Team;
+                  const sideColor = sideTeam==="red"?C.red:C.blue;
+                  return(
+                    <div key={p.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
+                      <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:sideColor,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {p.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
+                      </div>
+                      {Array.from({length:18},(_,i)=>i+1).map(h=>{
+                        const gross = parseInt(holeScores[h]?.[p.key]);
+                        const hasScore = !isNaN(gross) && gross>0;
+                        const res = holeResults[h];
+                        // Did THIS player's side win this hole? Highlight only
+                        // if their side won (not just any score being entered).
+                        const sideWonHole = (res==="p1"&&pi<p1Players.length) || (res==="p2"&&pi>=p1Players.length);
+                        const bg = sideWonHole ? (sideTeam==="red"?C.redBg:C.blueBg) : C.smoke;
+                        const col = sideWonHole ? sideColor : C.charcoal;
+                        return(
+                          <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            <span style={{fontSize:10,fontWeight:sideWonHole?700:500,color:hasScore?col:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
           <button onClick={async ()=>{
@@ -2859,7 +2895,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
           const bg = cur ? C.sand : (showResultColor ? winColor : "transparent");
           return(
             <div key={h} onClick={()=>setHoleNum(h)} style={{width:16,height:16,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,fontFamily:"Arial,sans-serif",background:bg,border:cur?`2px solid ${C.sand}`:`1.5px solid ${(showResultColor&&res)?"transparent":C.light}`,color:cur?C.charcoal:C.gray}}>
-              {cur?h:""}
+              {h}
             </div>
           );
         })}
