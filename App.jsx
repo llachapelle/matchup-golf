@@ -2831,70 +2831,117 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
           <div style={card()}>
             <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Scorecard</div>
             <div style={{overflowX:"auto"}}>
-              <div style={{minWidth:18*26+50}}>
-                {/* Hole number header row */}
-                <div style={{display:"flex",gap:2,marginBottom:2}}>
-                  <div style={{width:60,flexShrink:0}}/>
-                  {Array.from({length:18},(_,i)=>i+1).map(h=>(
-                    <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>
-                  ))}
-                </div>
-                {/* Par row */}
-                <div style={{display:"flex",gap:2,marginBottom:1}}>
-                  <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Par</div>
-                  {Array.from({length:18},(_,i)=>i+1).map(h=>(
-                    <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{course.pars[h-1]}</div>
-                  ))}
-                </div>
-                {/* Yardage row */}
-                {course.yardages&&(
-                  <div style={{display:"flex",gap:2,marginBottom:6}}>
-                    <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Yards</div>
-                    {Array.from({length:18},(_,i)=>i+1).map(h=>(
-                      <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{course.yardages[h-1]||"—"}</div>
-                    ))}
-                  </div>
-                )}
-                {!course.yardages&&<div style={{marginBottom:6}}/>}
-                {/* Per-player rows */}
-                {[...p1Players,...p2Players].map((p,pi)=>{
-                  const isExt = p.isExternal;
-                  const sideTeam = pi<p1Players.length ? p1Team : p2Team;
-                  const sideColor = sideTeam==="red"?C.red:C.blue;
-                  return(
-                    <div key={p.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
-                      <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:sideColor,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                        {p.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
-                      </div>
-                      {Array.from({length:18},(_,i)=>i+1).map(h=>{
-                        const gross = parseInt(holeScores[h]?.[p.key]);
-                        const hasScore = !isNaN(gross) && gross>0;
-                        const res = holeResults[h];
-                        const onWinningSide = (res==="p1"&&pi<p1Players.length) || (res==="p2"&&pi>=p1Players.length);
-                        // Among players on the winning side, find who actually
-                        // had the best net score this hole — only THAT player
-                        // gets highlighted, not their whole side.
-                        let isBestOnSide = false;
-                        if(onWinningSide && hasScore){
-                          const sideKeys = pi<p1Players.length
-                            ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(x=>x.key)]
-                            : [...(match.p2Keys||[]), ...p2ExtPlayers.map(x=>x.key)];
-                          const scoresThisHole = holeScores[h]||{};
-                          const nets = sideKeys.map(k=>({key:k, net:getNetLive(k, scoresThisHole, h)}));
-                          const bestNet = Math.min(...nets.map(n=>n.net));
-                          isBestOnSide = nets.find(n=>n.key===p.key)?.net === bestNet;
-                        }
-                        const bg = isBestOnSide ? (sideTeam==="red"?C.redBg:C.blueBg) : C.smoke;
-                        const col = isBestOnSide ? sideColor : C.charcoal;
-                        return(
-                          <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                            <span style={{fontSize:10,fontWeight:isBestOnSide?700:500,color:hasScore?col:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
-                          </div>
-                        );
-                      })}
+              <div style={{minWidth:18*26+50+90}}>
+                {/* Helper: total for a set of holes */}
+                {(() => {
+                  const parOut  = course.pars.slice(0,9).reduce((a,b)=>a+b,0);
+                  const parIn   = course.pars.slice(9,18).reduce((a,b)=>a+b,0);
+                  const parTot  = parOut+parIn;
+                  const ydsOut  = course.yardages ? course.yardages.slice(0,9).reduce((a,b)=>a+(b||0),0) : null;
+                  const ydsIn   = course.yardages ? course.yardages.slice(9,18).reduce((a,b)=>a+(b||0),0) : null;
+                  const ydsTot  = ydsOut!=null ? ydsOut+ydsIn : null;
+
+                  const totCell = (val, bold=false, bg=C.smoke) => (
+                    <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <span style={{fontSize:9,fontWeight:bold?700:500,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{val}</span>
                     </div>
                   );
-                })}
+
+                  return (<>
+                    {/* Hole number header */}
+                    <div style={{display:"flex",gap:2,marginBottom:2,alignItems:"center"}}>
+                      <div style={{width:60,flexShrink:0}}/>
+                      {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                        <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>
+                      ))}
+                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Out</div>
+                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>In</div>
+                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>Tot</div>
+                    </div>
+                    {/* Par row */}
+                    <div style={{display:"flex",gap:2,marginBottom:1,alignItems:"center"}}>
+                      <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Par</div>
+                      {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                        <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{course.pars[h-1]}</div>
+                      ))}
+                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{parOut}</div>
+                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{parIn}</div>
+                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{parTot}</div>
+                    </div>
+                    {/* Yardage row */}
+                    {course.yardages&&(
+                      <div style={{display:"flex",gap:2,marginBottom:6,alignItems:"center"}}>
+                        <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Yards</div>
+                        {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                          <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{course.yardages[h-1]||"—"}</div>
+                        ))}
+                        <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{ydsOut}</div>
+                        <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{ydsIn}</div>
+                        <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{ydsTot}</div>
+                      </div>
+                    )}
+                    {!course.yardages&&<div style={{marginBottom:6}}/>}
+                    {/* Per-player rows */}
+                    {[...p1Players,...p2Players].map((p,pi)=>{
+                      const isExt = p.isExternal;
+                      const sideTeam = pi<p1Players.length ? p1Team : p2Team;
+                      const sideColor = sideTeam==="red"?C.red:C.blue;
+                      // Tally gross scores for Out/In/Total
+                      let scoreOut=0, scoreIn=0, hasOut=false, hasIn=false;
+                      for(let h=1;h<=18;h++){
+                        const g = parseInt(holeScores[h]?.[p.key]);
+                        if(!isNaN(g)&&g>0){
+                          if(h<=9){ scoreOut+=g; hasOut=true; }
+                          else    { scoreIn+=g;  hasIn=true;  }
+                        }
+                      }
+                      const scoreTot = scoreOut+scoreIn;
+                      const relOut = hasOut ? scoreOut-parOut : null;
+                      const relIn  = hasIn  ? scoreIn-parIn  : null;
+                      const relTot = (hasOut||hasIn) ? scoreTot-parTot : null;
+                      const relColor = n => n===0?C.charcoal:n>0?C.red:C.green;
+
+                      return(
+                        <div key={p.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
+                          <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:sideColor,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {p.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
+                          </div>
+                          {Array.from({length:18},(_,i)=>i+1).map(h=>{
+                            const gross = parseInt(holeScores[h]?.[p.key]);
+                            const hasScore = !isNaN(gross) && gross>0;
+                            const res = holeResults[h];
+                            const onWinningSide = (res==="p1"&&pi<p1Players.length) || (res==="p2"&&pi>=p1Players.length);
+                            let isBestOnSide = false;
+                            if(onWinningSide && hasScore){
+                              const sideKeys = pi<p1Players.length
+                                ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(x=>x.key)]
+                                : [...(match.p2Keys||[]), ...p2ExtPlayers.map(x=>x.key)];
+                              const scoresThisHole = holeScores[h]||{};
+                              const nets = sideKeys.map(k=>({key:k, net:getNetLive(k, scoresThisHole, h)}));
+                              const bestNet = Math.min(...nets.map(n=>n.net));
+                              isBestOnSide = nets.find(n=>n.key===p.key)?.net === bestNet;
+                            }
+                            const bg = isBestOnSide ? (sideTeam==="red"?C.redBg:C.blueBg) : C.smoke;
+                            const col = isBestOnSide ? sideColor : C.charcoal;
+                            return(
+                              <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                <span style={{fontSize:10,fontWeight:isBestOnSide?700:500,color:hasScore?col:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
+                              </div>
+                            );
+                          })}
+                          {/* Out / In / Total totals */}
+                          {totCell(hasOut?scoreOut:"·")}
+                          {totCell(hasIn?scoreIn:"·")}
+                          <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:C.charcoal,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            <span style={{fontSize:10,fontWeight:700,color:C.white,fontFamily:"Arial,sans-serif"}}>
+                              {(hasOut||hasIn)?scoreTot:"·"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>);
+                })()}
               </div>
             </div>
           </div>
