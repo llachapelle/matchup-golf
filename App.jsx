@@ -35,6 +35,14 @@ const db = {
     return r.json();
   },
 
+  async delete(table, query){
+    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${query}`, {
+      method:"DELETE", headers:this.headers
+    });
+    if(!r.ok) throw new Error(await r.text());
+    return true;
+  },
+
   async rpc(fn, params={}){
     const r = await fetch(`${SUPA_URL}/rest/v1/rpc/${fn}`, {
       method:"POST", headers:this.headers, body:JSON.stringify(params)
@@ -1341,14 +1349,43 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
   const upcoming = matches.filter(m=>m.status==="upcoming");
   const done     = matches.filter(m=>m.status==="completed");
 
+  const today = new Date().toISOString().split("T")[0];
   const fmtDate = (dateStr) => {
     if(!dateStr) return null;
-    const today = new Date().toISOString().split("T")[0];
     if(dateStr === today) return "Today";
     const d = new Date(dateStr+"T12:00:00");
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
     if(dateStr === tomorrow.toISOString().split("T")[0]) return "Tomorrow";
     return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+  };
+
+  // Group an array of matches by date+course into rounds, sorted chronologically
+  const groupByRound = (arr) => {
+    const byKey = {};
+    arr.forEach(m=>{
+      const key = `${m.match_date||"unscheduled"}__${m.course_name||"Course TBD"}`;
+      if(!byKey[key]) byKey[key] = {date:m.match_date||null, course:m.course_name||"Course TBD", matches:[]};
+      byKey[key].matches.push(m);
+    });
+    return Object.values(byKey).sort((a,b)=>{
+      if(!a.date) return 1; if(!b.date) return -1;
+      return a.date.localeCompare(b.date);
+    });
+  };
+
+  const RoundHeader = ({date, course}) => {
+    const dateLabel = fmtDate(date);
+    return(
+      <div style={{marginBottom:8,marginTop:4}}>
+        {dateLabel&&<div style={{fontSize:10,fontWeight:700,color:date===today?C.forest:C.gray,
+          fontFamily:"Arial,sans-serif",textTransform:"uppercase",letterSpacing:.7,marginBottom:1}}>
+          {dateLabel}
+        </div>}
+        <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
+          📍 {course}
+        </div>
+      </div>
+    );
   };
 
   const SectionHeader = ({label, count}) => (
@@ -1373,13 +1410,19 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
         {active.length>0&&(
           <>
             <SectionHeader label="Live Now" count={active.length}/>
-            {active.map(m=>(
-              <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
-                expanded={expandedMatch===m.id}
-                onTap={()=>goMatch(m.id,"live")}
-                goMatch={goMatch} go={go}/>
+            {groupByRound(active).map(round=>(
+              <div key={`${round.date}__${round.course}`} style={{marginBottom:8}}>
+                {(active.length>1)&&<RoundHeader date={round.date} course={round.course}/>}
+                {round.matches.map(m=>(
+                  <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
+                    showDate={active.length===1}
+                    expanded={expandedMatch===m.id}
+                    onTap={()=>goMatch(m.id,"live")}
+                    goMatch={goMatch} go={go}/>
+                ))}
+              </div>
             ))}
-            <div style={{height:12}}/>
+            <div style={{height:8}}/>
           </>
         )}
 
@@ -1387,17 +1430,23 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
         {upcoming.length>0&&(
           <>
             <SectionHeader label="Upcoming" count={upcoming.length}/>
-            {upcoming.map(m=>(
-              <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
-                expanded={expandedMatch===m.id}
-                onTap={()=>goMatch(m.id,"live")}
-                goMatch={goMatch} go={go}/>
+            {groupByRound(upcoming).map(round=>(
+              <div key={`${round.date}__${round.course}`} style={{marginBottom:8}}>
+                <RoundHeader date={round.date} course={round.course}/>
+                {round.matches.map(m=>(
+                  <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
+                    showDate={false}
+                    expanded={expandedMatch===m.id}
+                    onTap={()=>goMatch(m.id,"live")}
+                    goMatch={goMatch} go={go}/>
+                ))}
+              </div>
             ))}
-            <div style={{height:12}}/>
+            <div style={{height:8}}/>
           </>
         )}
 
-        {/* ── COMPLETED — collapsed by default ── */}
+        {/* ── COMPLETED — collapsed, grouped by round ── */}
         {done.length>0&&(
           <>
             <button onClick={()=>setShowCompleted(v=>!v)}
@@ -1411,11 +1460,17 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
             </button>
             {showCompleted&&(
               <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:4}}>
-                {done.map(m=>(
-                  <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
-                    expanded={expandedMatch===m.id}
-                    onTap={()=>setExpandedMatch(expandedMatch===m.id?null:m.id)}
-                    goMatch={goMatch} go={go}/>
+                {groupByRound(done).map(round=>(
+                  <div key={`${round.date}__${round.course}`} style={{marginBottom:4}}>
+                    <RoundHeader date={round.date} course={round.course}/>
+                    {round.matches.map(m=>(
+                      <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
+                        showDate={false}
+                        expanded={expandedMatch===m.id}
+                        onTap={()=>setExpandedMatch(expandedMatch===m.id?null:m.id)}
+                        goMatch={goMatch} go={go}/>
+                    ))}
+                  </div>
                 ))}
               </div>
             )}
@@ -1430,7 +1485,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
 // ─── MATCH CARD COMPONENT ────────────────────────────────────────────────────
 // Extracted from MatchesScreen — renders a single match card in the list.
 // Props: m (match), tripPlayers, expanded (bool), onTap, goMatch, go
-function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate}){
+function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showDate=false}){
   const p1Team = (m.p1Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "red";
   const p2Team = (m.p2Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "blue";
 
@@ -1488,8 +1543,8 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate}){
             vs {(isScr||isXB) ? (topSide==="p1"?(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2 : (m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1) : bottomLabel}
           </div>
 
-          {/* Date + Course + format */}
-          {(m.match_date||m.course_name)&&(
+          {/* Date shown on card only when no separate round header is displayed */}
+          {(showDate&&(m.match_date||m.course_name))&&(
             <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:4}}>
               {fmtDate&&m.match_date?<span style={{fontWeight:600}}>{fmtDate(m.match_date)}{m.course_name?" · ":""}</span>:null}
               {m.course_name?`📍 ${m.course_name}${m.tee_name?` · ${m.tee_name}`:""}`:null}
@@ -2898,6 +2953,22 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
             <button onClick={()=>{ goMatch(match.id,"creatematch"); }}
               style={{background:"rgba(255,255,255,.15)",border:"none",color:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:700}}>
               Edit
+            </button>
+            <button onClick={async ()=>{
+              if(!window.confirm("Clear all scores and reset this match to upcoming?")) return;
+              // Wipe hole scores from DB
+              try { await db.delete("hole_scores",`match_id=eq.${match.id}`); } catch(e){}
+              // Reset match row
+              await db.patch("matches",`id=eq.${match.id}`,{
+                status:"upcoming", thru:0, live_score:null,
+                score_data:null, banked_scores:null, winner_side:null, score:null
+              });
+              // Reset local state
+              setHoleScores({}); setHoleResults({}); setHoleNum(1);
+              setShowSummary(false);
+            }}
+              style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.7)",borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:600}}>
+              Clear
             </button>
           </div>
         </div>
