@@ -5947,7 +5947,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
 // ─── INTENT SCREEN ────────────────────────────────────────────────────────────
 // Shown when a user is logged in but has no active trip. Lets them choose
 // between planning a full trip or jumping straight into a quick one-off match.
-function IntentScreen({onTrip, onQuickMatch, loading}){
+function IntentScreen({onTrip, onQuickMatch, loading, error}){
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
       background:`linear-gradient(165deg,${C.forest},${C.turf})`,padding:32,gap:0}}>
@@ -5956,6 +5956,7 @@ function IntentScreen({onTrip, onQuickMatch, loading}){
       <div style={{fontSize:14,color:"rgba(255,255,255,.65)",fontFamily:"Arial,sans-serif",marginBottom:40,textAlign:"center"}}>
         What are you doing today?
       </div>
+      {error&&<div style={{background:"rgba(255,0,0,.2)",borderRadius:10,padding:"8px 12px",marginBottom:16,fontSize:12,color:"#FFB3B3",fontFamily:"Arial,sans-serif",textAlign:"center",width:"100%"}}>{error}</div>}
 
       {/* Plan a Trip */}
       <button onClick={onTrip}
@@ -6697,9 +6698,12 @@ export default function App(){
   // logic works unchanged, then drops the user straight into match creation.
   // The trip is named "Quick Match · [date]" and is invisible to the user —
   // they just land on the create-match screen as if no setup happened.
+  const [quickMatchError, setQuickMatchError] = useState("");
+
   const handleQuickMatch = useCallback(async () => {
     if(!session?.user?.id){ setScreen("login"); return; }
     setQuickMatchLoading(true);
+    setQuickMatchError("");
     try {
       const today = new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
       const code = String(Math.floor(100000+Math.random()*900000));
@@ -6711,20 +6715,25 @@ export default function App(){
         location:     null,
         start_date:   new Date().toISOString().split("T")[0],
         end_date:     new Date().toISOString().split("T")[0],
+        team1_name:   "Red",
+        team2_name:   "Blue",
       });
-      // Add the organizer as a player on the shadow trip
-      await db.post("trip_players",[{
+      // Add the organizer as the first player on the shadow trip
+      const playerName = session.user.user_metadata?.display_name
+        || session.user.email?.split("@")[0]
+        || "Player";
+      await db.post("trip_players",{
         trip_id:   trip.id,
-        name:      session.user.user_metadata?.display_name || session.user.email?.split("@")[0] || "Player",
+        name:      playerName,
         team:      "red",
         user_id:   session.user.id,
         hcp_index: null,
         is_guest:  false,
-      }]);
+      });
       await loadTrip(trip);
       setScreen("creatematch");
     } catch(e){
-      console.error("Quick match setup failed:", e);
+      setQuickMatchError("Something went wrong — " + (e.message||"please try again"));
     }
     setQuickMatchLoading(false);
   }, [session, loadTrip]);
@@ -6786,7 +6795,7 @@ export default function App(){
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
             {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
             {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);setScreen("creatematch");}}/>}
-            {screen==="intent"      &&<IntentScreen       onTrip={()=>setScreen("setup")} onQuickMatch={handleQuickMatch} loading={quickMatchLoading}/>}
+            {screen==="intent"      &&<IntentScreen       onTrip={()=>setScreen("setup")} onQuickMatch={handleQuickMatch} loading={quickMatchLoading} error={quickMatchError}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} goBack={goBack} onSignOut={handleSignOut} session={session} tripPlayers={tripPlayers} activeTrip={activeTrip} lifetimeStats={lifetimeStats} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} goBack={goBack} matchId={selectedMatchId} {...matchProps}/>}
