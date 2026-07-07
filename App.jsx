@@ -861,17 +861,26 @@ function LoginScreen({onAuth, defaultMode="join"}){
     if(!email||!pw){ setError("Enter email and password"); return; }
     setLoading(true); setError("");
     try {
-      // Try sign up first; if email already registered, sign in instead
-      let res = await auth.signUp(email, pw, name.trim());
-      if(res.error && (res.error.message||"").toLowerCase().includes("already")){
-        res = await auth.signIn(email, pw);
+      // Try signing in first — if they already have an account this works immediately.
+      // Only attempt sign up if sign in fails (wrong credentials = new user).
+      let session = null;
+      const signInRes = await auth.signIn(email, pw);
+      if(signInRes.access_token){
+        session = signInRes;
+      } else {
+        // Sign in failed — try creating a new account
+        const signUpRes = await auth.signUp(email, pw, name.trim());
+        if(signUpRes.error) throw new Error(signUpRes.error.message||signUpRes.error.msg||"Account error");
+        // If sign up succeeded but no token yet (email confirmation), try signing in again
+        if(!signUpRes.access_token){
+          const retry = await auth.signIn(email, pw);
+          if(retry.access_token) session = retry;
+          else throw new Error("Account created — check your email to confirm, then try signing in.");
+        } else {
+          session = signUpRes;
+        }
       }
-      if(res.error) throw new Error(res.error.message||res.error.msg||"Account error");
-      let session = res;
-      if(!session.access_token && (res.user||res.id)){
-        session = await auth.signIn(email, pw);
-      }
-      if(!session.access_token) throw new Error("Could not create or sign in to account");
+      if(!session?.access_token) throw new Error("Could not sign in — check your email and password");
       await linkPlayerToUser(foundTrip.id, session.user.id, name.trim());
       onAuth({ mode:"auth", session, trip: foundTrip });
     } catch(e){ setError(e.message||"Failed to join"); }
@@ -988,8 +997,8 @@ function LoginScreen({onAuth, defaultMode="join"}){
             <span style={{fontSize:16}}>✓</span>
             <span style={{fontSize:13,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:600}}>Found "{foundTrip?.name}"</span>
           </div>
-          <div style={{fontSize:18,fontWeight:700,color:C.charcoal,marginBottom:4}}>What's your name?</div>
-          <div style={{fontSize:12,fontFamily:"Arial,sans-serif",color:C.gray,marginBottom:14}}>Create a quick account so your scores and handicap follow you across devices and future trips.</div>
+          <div style={{fontSize:18,fontWeight:700,color:C.charcoal,marginBottom:4}}>Sign in or create an account</div>
+          <div style={{fontSize:12,fontFamily:"Arial,sans-serif",color:C.gray,marginBottom:14}}>Already have an account? Just enter your existing email and password. New here? Fill in your name and we'll create one for you.</div>
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name (as on the trip roster)"
             style={{padding:"14px 16px",border:`1.5px solid ${C.light}`,borderRadius:12,fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",marginBottom:10}}/>
           <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" type="email"
@@ -997,7 +1006,7 @@ function LoginScreen({onAuth, defaultMode="join"}){
           <input value={pw} onChange={e=>setPw(e.target.value)} placeholder="Password" type="password"
             style={{padding:"14px 16px",border:`1.5px solid ${C.light}`,borderRadius:12,fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",marginBottom:14}}/>
           <button onClick={handleJoinFinish} disabled={loading} style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.28)"})}>
-            {loading?"Joining…":"Create Account & Join →"}
+            {loading?"Joining…":"Join Trip →"}
           </button>
           <div style={{textAlign:"center",marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
             <span onClick={handleJoinAsGuest} style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",cursor:"pointer",textDecoration:"underline"}}>
