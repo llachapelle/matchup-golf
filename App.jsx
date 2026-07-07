@@ -4843,6 +4843,58 @@ function ProfileScreen({go, goBack, matches, playerRecords, onSignOut, session, 
     </div>
   );
 }
+function TripNameEditor({activeTrip}){
+  const [editing, setEditing] = useState(false);
+  const [name,    setName]    = useState("");
+  const [saving,  setSaving]  = useState(false);
+
+  const open = () => { setName(activeTrip?.name||""); setEditing(true); };
+  const save = async () => {
+    if(!activeTrip?.id||!name.trim()){ setEditing(false); return; }
+    setSaving(true);
+    try {
+      await db.patch("trips", `id=eq.${activeTrip.id}`, { name: name.trim() });
+      activeTrip.name = name.trim(); // optimistic update
+    } catch(e){ console.warn("Failed to save trip name:", e.message); }
+    setSaving(false);
+    setEditing(false);
+  };
+
+  return(
+    <div style={card()}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:editing?12:0}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>Trip Name</div>
+          {!editing&&<div style={{fontSize:13,color:C.forest,fontFamily:"Arial,sans-serif",marginTop:2,fontWeight:600}}>{activeTrip?.name||"—"}</div>}
+        </div>
+        {!editing&&<button onClick={open}
+          style={{background:C.smoke,border:`1.5px solid ${C.light}`,color:C.forest,borderRadius:8,
+            padding:"5px 12px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
+          Edit
+        </button>}
+      </div>
+      {editing&&(<>
+        <input value={name} onChange={e=>setName(e.target.value)} autoFocus
+          placeholder="e.g. Ranger Open 2026"
+          style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.forest}`,borderRadius:12,
+            fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box",marginBottom:10}}/>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={save} disabled={saving}
+            style={{flex:1,background:`linear-gradient(135deg,${C.forest},${C.fairway})`,border:"none",
+              color:C.white,borderRadius:10,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+            {saving?"Saving…":"Save"}
+          </button>
+          <button onClick={()=>setEditing(false)}
+            style={{flex:1,background:C.smoke,border:`1.5px solid ${C.light}`,color:C.gray,
+              borderRadius:10,padding:"11px",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+            Cancel
+          </button>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch, userInitials}){
   const [section,   setSection]  = useState("Matches");
   const [collapsedRounds, setCollapsedRounds] = useState({});
@@ -5258,21 +5310,21 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 
         {/* ── SETTINGS TAB ── */}
         {section==="Settings"&&(<>
-          {[
-            {icon:"📤",label:"Trip Code",    desc:"Share to invite players", action:tripCode,      color:C.forest},
-            {icon:"🏌️",label:"Format",       desc:"Ryder Cup Match Play",    action:"Edit"},
-            {icon:"💵",label:"Side Games",   desc:"Nassau + Skins",          action:"Edit"},
-            {icon:"🔔",label:"Notifications",desc:"Score updates enabled",   action:"On"},
-          ].map((s,i)=>(
-            <div key={i} style={card({display:"flex",alignItems:"center",gap:14})}>
-              <div style={{fontSize:24}}>{s.icon}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{s.label}</div>
-                <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{s.desc}</div>
-              </div>
-              <div style={{...pill(C.mist,s.color||C.forest),fontSize:11,cursor:"pointer"}}>{s.action}</div>
+          {/* Trip Name */}
+          <TripNameEditor activeTrip={activeTrip}/>
+
+          {/* Trip Code */}
+          <div style={card({display:"flex",alignItems:"center",gap:14})}>
+            <div style={{fontSize:24}}>📤</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>Trip Code</div>
+              <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Share to invite players</div>
             </div>
-          ))}
+            <div onClick={()=>{navigator.clipboard?.writeText(tripCode);setSaveMsg("Code copied!");}}
+              style={{...pill(C.mist,C.forest),fontSize:11,cursor:"pointer",fontWeight:700,letterSpacing:1}}>
+              {tripCode}
+            </div>
+          </div>
         </>)}
 
       </div>
