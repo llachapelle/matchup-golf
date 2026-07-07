@@ -1,8 +1,7 @@
 // Vercel serverless function — proxies course search to golfcourseapi.com.
-// API key stored as GOLF_COURSE_API_KEY environment variable in Vercel.
+// Uses CommonJS exports for maximum Vercel compatibility.
 
-export default async function handler(req, res) {
-  // Allow CORS from the app
+module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
   if(req.method !== "GET"){
@@ -13,16 +12,13 @@ export default async function handler(req, res) {
   if(!apiKey){
     return res.status(500).json({
       error: "Golf course API key not configured",
-      hint: "Add GOLF_COURSE_API_KEY to Vercel environment variables, then redeploy."
+      hint: "Add GOLF_COURSE_API_KEY to Vercel environment variables."
     });
   }
 
   const { q, id } = req.query;
-
-  // golfcourseapi.com endpoints:
-  //   Search: GET /v1/search?search_query=giants+ridge
-  //   Detail: GET /v1/courses/:id
   let url;
+
   if(id){
     url = `https://api.golfcourseapi.com/v1/courses/${encodeURIComponent(id)}`;
   } else if(q){
@@ -33,30 +29,19 @@ export default async function handler(req, res) {
 
   try {
     const response = await fetch(url, {
-      headers: {
-        "Authorization": `Key ${apiKey}`,
-        "Content-Type": "application/json",
-      }
+      headers: { "Authorization": `Key ${apiKey}` }
     });
-
     const text = await response.text();
-
-    // Try to parse as JSON; if it fails, return raw text so we can debug
     let data;
-    try {
-      data = JSON.parse(text);
-    } catch(e) {
+    try { data = JSON.parse(text); }
+    catch(e){
       return res.status(response.status).json({
-        error: `API returned non-JSON (status ${response.status})`,
-        raw: text.slice(0, 500),
+        error: `API returned non-JSON (${response.status})`,
+        raw: text.slice(0, 300)
       });
     }
-
     return res.status(response.status).json(data);
   } catch(e) {
-    return res.status(500).json({
-      error: e.message || "Course lookup failed",
-      url: url, // include the URL we tried so we can debug
-    });
+    return res.status(500).json({ error: e.message || "Course lookup failed" });
   }
 }
