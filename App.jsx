@@ -5944,6 +5944,55 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
 }
 
 
+// ─── INTENT SCREEN ────────────────────────────────────────────────────────────
+// Shown when a user is logged in but has no active trip. Lets them choose
+// between planning a full trip or jumping straight into a quick one-off match.
+function IntentScreen({onTrip, onQuickMatch, loading}){
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+      background:`linear-gradient(165deg,${C.forest},${C.turf})`,padding:32,gap:0}}>
+      <div style={{fontSize:56,marginBottom:16}}>⛳</div>
+      <div style={{fontSize:26,fontWeight:700,color:C.white,marginBottom:6,textAlign:"center"}}>MatchUp Golf</div>
+      <div style={{fontSize:14,color:"rgba(255,255,255,.65)",fontFamily:"Arial,sans-serif",marginBottom:40,textAlign:"center"}}>
+        What are you doing today?
+      </div>
+
+      {/* Plan a Trip */}
+      <button onClick={onTrip}
+        style={{width:"100%",background:C.white,border:"none",borderRadius:18,padding:"20px 24px",
+          marginBottom:14,cursor:"pointer",textAlign:"left",
+          boxShadow:"0 4px 20px rgba(0,0,0,.2)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{fontSize:36}}>🗓️</div>
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif"}}>Plan a Trip</div>
+            <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:3,lineHeight:1.4}}>
+              Set up rounds, invite your group, track the whole trip over multiple days
+            </div>
+          </div>
+        </div>
+      </button>
+
+      {/* Quick Match */}
+      <button onClick={onQuickMatch} disabled={loading}
+        style={{width:"100%",background:"rgba(255,255,255,.15)",border:"2px solid rgba(255,255,255,.3)",
+          borderRadius:18,padding:"20px 24px",cursor:loading?"not-allowed":"pointer",textAlign:"left"}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{fontSize:36}}>{loading?"⏳":"⚡"}</div>
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:C.white,fontFamily:"Arial,sans-serif"}}>
+              {loading?"Setting up…":"Quick Match"}
+            </div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,.65)",fontFamily:"Arial,sans-serif",marginTop:3,lineHeight:1.4}}>
+              Jump straight into a single match right now — no trip setup needed
+            </div>
+          </div>
+        </div>
+      </button>
+    </div>
+  );
+}
+
 function TripSetupScreen({go, session, onTripCreated}){
   const [step,      setStep]     = useState(1);
   const [tripName,  setTripName] = useState("");
@@ -6207,6 +6256,7 @@ export default function App(){
   }, [session?.refresh_token]);
   const [activeTrip,      setActiveTrip]     = useState(null);
   const [tripLoading,     setTripLoading]    = useState(false);
+  const [quickMatchLoading, setQuickMatchLoading] = useState(false);
   const [tripPlayers,     setTripPlayers]    = useState([]);
   const [appReady,        setAppReady]       = useState(false);
   const [editMatch,       setEditMatch]      = useState(null);
@@ -6263,8 +6313,8 @@ export default function App(){
   const ts            = useMemo(()=>deriveTeamScores(matches, tripPlayers),    [matches, tripPlayers]);
   const playerRecords = useMemo(()=>derivePlayerRecords(matches), [matches]);
 
-  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup","payouts","sidegamesetup"];
-  const showNav    = navScreens.includes(screen);
+  const navScreens = ["dashboard","matches","live","board","trip","profile","sidegames","setup","matchedit","creatematch","coursesetup","payouts","sidegamesetup","intent"];
+  const showNav    = navScreens.includes(screen) && screen !== "intent" && screen !== "login";
   const goMatch = (matchId, dest) => {
     setSelectedMatchId(matchId);
     if(dest === "creatematch"){
@@ -6581,7 +6631,7 @@ export default function App(){
                 setScreen("dashboard");
               } else {
                 // Logged in but no active trip — go straight to trip setup
-                setScreen("setup");
+                setScreen("intent");
               }
             } catch(e){ setScreen("dashboard"); }
             setAppReady(true); return;
@@ -6627,7 +6677,7 @@ export default function App(){
       } catch(e){}
     }
     // If no trip found, send them to setup instead of showing empty demo data
-    setScreen(foundTrip ? "dashboard" : "setup");
+    setScreen(foundTrip ? "dashboard" : "intent");
   };
 
   const handleSignOut = useCallback(() => {
@@ -6642,6 +6692,42 @@ export default function App(){
   const handleTripCreated = useCallback(async (trip) => {
     await loadTrip(trip);
   }, [loadTrip]);
+
+  // Quick Match: silently creates a minimal shadow trip so all match/scoring
+  // logic works unchanged, then drops the user straight into match creation.
+  // The trip is named "Quick Match · [date]" and is invisible to the user —
+  // they just land on the create-match screen as if no setup happened.
+  const handleQuickMatch = useCallback(async () => {
+    if(!session?.user?.id){ setScreen("login"); return; }
+    setQuickMatchLoading(true);
+    try {
+      const today = new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+      const code = String(Math.floor(100000+Math.random()*900000));
+      const [trip] = await db.post("trips",{
+        name:         `Quick Match · ${today}`,
+        join_code:    code,
+        organizer_id: session.user.id,
+        status:       "active",
+        location:     null,
+        start_date:   new Date().toISOString().split("T")[0],
+        end_date:     new Date().toISOString().split("T")[0],
+      });
+      // Add the organizer as a player on the shadow trip
+      await db.post("trip_players",[{
+        trip_id:   trip.id,
+        name:      session.user.user_metadata?.display_name || session.user.email?.split("@")[0] || "Player",
+        team:      "red",
+        user_id:   session.user.id,
+        hcp_index: null,
+        is_guest:  false,
+      }]);
+      await loadTrip(trip);
+      setScreen("creatematch");
+    } catch(e){
+      console.error("Quick match setup failed:", e);
+    }
+    setQuickMatchLoading(false);
+  }, [session, loadTrip]);
 
   const handleMatchCreated = useCallback((newMatch) => {
     setMatches(prev => {
@@ -6700,6 +6786,7 @@ export default function App(){
             {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
             {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
             {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);setScreen("creatematch");}}/>}
+            {screen==="intent"      &&<IntentScreen       onTrip={()=>setScreen("setup")} onQuickMatch={handleQuickMatch} loading={quickMatchLoading}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} goBack={goBack} onSignOut={handleSignOut} session={session} tripPlayers={tripPlayers} activeTrip={activeTrip} lifetimeStats={lifetimeStats} {...matchProps}/>}
             {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} goBack={goBack} matchId={selectedMatchId} {...matchProps}/>}
