@@ -1359,31 +1359,47 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
     return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
   };
 
-  // Group an array of matches by date+course into rounds, sorted chronologically
+  // Group matches into rounds. If a match has a round_name set, group by that.
+  // Otherwise fall back to date. This lets organizers say "Round 1" and have
+  // all those matches appear together regardless of exact date, while still
+  // working sensibly when no round name is set.
   const groupByRound = (arr) => {
     const byKey = {};
     arr.forEach(m=>{
-      const key = `${m.match_date||"unscheduled"}__${m.course_name||"Course TBD"}`;
-      if(!byKey[key]) byKey[key] = {date:m.match_date||null, course:m.course_name||"Course TBD", matches:[]};
+      // Use round_name if set, otherwise fall back to date string
+      const key = m.round_name ? m.round_name : (m.match_date || "unscheduled");
+      if(!byKey[key]) byKey[key] = {
+        key,
+        label: m.round_name || null,
+        date:  m.match_date || null,
+        matches:[]
+      };
       byKey[key].matches.push(m);
     });
     return Object.values(byKey).sort((a,b)=>{
-      if(!a.date) return 1; if(!b.date) return -1;
-      return a.date.localeCompare(b.date);
+      // Sort by the date of the first match in each group
+      const ad = a.matches[0]?.match_date || "9999";
+      const bd = b.matches[0]?.match_date || "9999";
+      return ad.localeCompare(bd);
     });
   };
 
-  const RoundHeader = ({date, course}) => {
-    const dateLabel = fmtDate(date);
+  const RoundHeader = ({label, date, matches: roundMatches}) => {
+    const dateLabel = date ? fmtDate(date) : null;
+    const isToday = date === today;
+    // Collect unique course names across all matches in this round
+    const courses = [...new Set((roundMatches||[]).map(m=>m.course_name).filter(Boolean))];
+    const courseStr = courses.join(" · ");
     return(
-      <div style={{marginBottom:8,marginTop:4}}>
-        {dateLabel&&<div style={{fontSize:10,fontWeight:700,color:date===today?C.forest:C.gray,
-          fontFamily:"Arial,sans-serif",textTransform:"uppercase",letterSpacing:.7,marginBottom:1}}>
-          {dateLabel}
-        </div>}
-        <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
-          📍 {course}
+      <div style={{marginBottom:6,marginTop:4}}>
+        <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+          {label
+            ? <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{label}</div>
+            : <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{dateLabel||"Unscheduled"}</div>
+          }
+          {label&&dateLabel&&<div style={{fontSize:11,color:isToday?C.forest:C.gray,fontFamily:"Arial,sans-serif"}}>{dateLabel}</div>}
         </div>
+        {courseStr&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>📍 {courseStr}</div>}
       </div>
     );
   };
@@ -1412,7 +1428,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
             <SectionHeader label="Live Now" count={active.length}/>
             {groupByRound(active).map(round=>(
               <div key={`${round.date}__${round.course}`} style={{marginBottom:8}}>
-                {(active.length>1)&&<RoundHeader date={round.date} course={round.course}/>}
+                {(active.length>1)&&<RoundHeader label={round.label} date={round.date} matches={round.matches}/>}
                 {round.matches.map(m=>(
                   <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
                     showDate={active.length===1}
@@ -1432,7 +1448,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
             <SectionHeader label="Upcoming" count={upcoming.length}/>
             {groupByRound(upcoming).map(round=>(
               <div key={`${round.date}__${round.course}`} style={{marginBottom:8}}>
-                <RoundHeader date={round.date} course={round.course}/>
+                <RoundHeader label={round.label} date={round.date} matches={round.matches}/>
                 {round.matches.map(m=>(
                   <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
                     showDate={false}
@@ -1462,7 +1478,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
               <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:4}}>
                 {groupByRound(done).map(round=>(
                   <div key={`${round.date}__${round.course}`} style={{marginBottom:4}}>
-                    <RoundHeader date={round.date} course={round.course}/>
+                    <RoundHeader label={round.label} date={round.date} matches={round.matches}/>
                     {round.matches.map(m=>(
                       <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
                         showDate={false}
@@ -1546,6 +1562,7 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
           {/* Date shown on card only when no separate round header is displayed */}
           {(showDate&&(m.match_date||m.course_name))&&(
             <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:4}}>
+              {m.round_name&&<span style={{fontWeight:600,color:C.forest}}>{m.round_name} · </span>}
               {fmtDate&&m.match_date?<span style={{fontWeight:600}}>{fmtDate(m.match_date)}{m.course_name?" · ":""}</span>:null}
               {m.course_name?`📍 ${m.course_name}${m.tee_name?` · ${m.tee_name}`:""}`:null}
             </div>
@@ -5381,6 +5398,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
     // Default to today in YYYY-MM-DD format
     return new Date().toISOString().split("T")[0];
   });
+  const [roundName,      setRoundName]     = useState(isEdit ? (editMatch.round_name||"") : "");
   const [selectedCourse, setSelectedCourse]= useState(null);
   const [selectedTee,    setSelectedTee]   = useState(null);
   const [saving,         setSaving]        = useState(false);
@@ -5420,6 +5438,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
         winner_side:   isEdit ? editMatch.winnerSide : null,
         thru:          isEdit ? (editMatch.thru||0) : 0,
         match_date:    matchDate || new Date().toISOString().split("T")[0],
+        round_name:    roundName.trim() || null,
         // Only update course/tee if user actually selected one — preserve existing on edit
         course_name:   selectedCourse?.name || (isEdit ? editMatch.course_name : null),
         tee_name:      selectedTee?.name    || (isEdit ? editMatch.tee_name    : null),
@@ -5450,6 +5469,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           par:           matchData.par,
           hole_data:     matchData.hole_data,
           match_date:    matchData.match_date,
+          round_name:    matchData.round_name,
         });
         onMatchCreated && onMatchCreated({
           ...editMatch,
@@ -5467,6 +5487,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           par:         matchData.par,
           hole_data:   matchData.hole_data,
           match_date:  matchData.match_date,
+          round_name:  matchData.round_name,
         });
       } else {
         // Create new match
@@ -5480,6 +5501,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           status:"upcoming", winnerSide:null, thru:0,
           hole_data: matchData.hole_data,
           match_date: matchData.match_date,
+          round_name: matchData.round_name,
         });
       }
       go("trip");
@@ -5536,18 +5558,18 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           </div>
         )}
 
-        {/* Date picker — sets which round/day this match belongs to */}
+        {/* Date & Round picker */}
         <div style={card()}>
-          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Date</div>
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Date & Round</div>
           <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>
-            Which day is this match being played? Used to group matches by round on the Matches tab.
+            Set the date and optionally name the round. Matches with the same round name will group together on the Matches tab.
           </div>
           <input type="date" value={matchDate} onChange={e=>setMatchDate(e.target.value)}
             style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.forest}`,borderRadius:12,
               fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",
-              color:C.charcoal,background:C.white,boxSizing:"border-box"}}/>
+              color:C.charcoal,background:C.white,boxSizing:"border-box",marginBottom:8}}/>
           {/* Quick-select buttons for common relative dates */}
-          <div style={{display:"flex",gap:6,marginTop:8}}>
+          <div style={{display:"flex",gap:6,marginBottom:12}}>
             {[["Today",0],["Tomorrow",1],["In 2 days",2]].map(([label,offset])=>{
               const d = new Date(); d.setDate(d.getDate()+offset);
               const val = d.toISOString().split("T")[0];
@@ -5562,6 +5584,16 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
               );
             })}
           </div>
+          <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",textTransform:"uppercase",letterSpacing:.7,marginBottom:6}}>Round Name <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></div>
+          <input value={roundName} onChange={e=>setRoundName(e.target.value)}
+            placeholder="e.g. Round 1, Morning Wave, Day 2…"
+            style={{width:"100%",padding:"11px 13px",border:`1.5px solid ${C.light}`,borderRadius:11,
+              fontSize:14,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
+          {roundName.trim()&&(
+            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:6}}>
+              This match will group with other "{roundName.trim()}" matches on the Matches tab.
+            </div>
+          )}
         </div>
 
         {/* Format picker */}
@@ -6165,6 +6197,7 @@ export default function App(){
           hcp_pct:     m.hcp_pct     || 90,
           course_name: m.course_name || null,
           match_date:  m.match_date  || null,
+          round_name:  m.round_name  || null,
           tee_name:    m.tee_name    || null,
           slope:       m.slope       || null,
           rating:      m.rating      || null,
