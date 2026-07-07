@@ -3917,102 +3917,78 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
       <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         <TeamScoreCards ts={ts}/>
 
-        {/* Individual leaderboard */}
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"0 2px"}}>
-            <div>
-              <div style={{fontSize:15,fontWeight:700,color:C.charcoal}}>Individual</div>
-              <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>
-                {hasPlayed.length} of {players.length} played · {hasPoints.length} with points
-              </div>
-            </div>
+        {/* Individual leaderboard — compact list */}
+        <div style={card()}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontSize:15,fontWeight:700,color:C.charcoal}}>Individual</div>
             <select value={sortBy} onChange={e=>setSortBy(e.target.value)}
-              style={{border:`1.5px solid ${C.light}`,borderRadius:8,padding:"4px 8px",fontSize:11,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,background:C.white,cursor:"pointer"}}>
+              style={{border:`1.5px solid ${C.light}`,borderRadius:8,padding:"4px 8px",fontSize:11,
+                fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,background:C.white,cursor:"pointer"}}>
               {["Points","Record","Money"].map(s=><option key={s}>{s}</option>)}
             </select>
           </div>
 
-          {/* Player rows */}
-          {visiblePlayers.map(p=>{
-            const isMe        = false; // "You" badge handled via Profile screen
+          {visiblePlayers.map((p,i)=>{
             const hasPlayed_p = p.played > 0;
             const hasPoints_p = p.points > 0;
-            const statusLabel = !hasPlayed_p ? "No matches yet"
-                              : hasPoints_p  ? p.record
-                              : `${p.record} · 0 pts`;
+            const tc = teamColor(p.team);
             return(
-              <div key={p.key} onClick={()=>go("profile")}
-                style={{...card({marginBottom:6,cursor:"pointer",
-                  borderLeft:`4px solid ${teamColor(p.team)}`,
-                  background: isMe ? C.mist : C.white,
-                  opacity: hasPlayed_p ? 1 : 0.6,
-                })}}>
-                <div style={{display:"flex",alignItems:"center",gap:12}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif",width:16,textAlign:"center"}}>{p.rank}</div>
-                  <div style={{width:36,height:36,borderRadius:"50%",background:teamBg(p.team),border:`1.5px solid ${teamColor(p.team)}33`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                    <span style={{fontSize:13,fontWeight:700,color:teamColor(p.team),fontFamily:"Arial,sans-serif"}}>{calcInitials(p.name)}</span>
+              <div key={p.key} style={{
+                display:"flex",alignItems:"center",gap:10,
+                padding:"8px 0",
+                borderBottom: i<visiblePlayers.length-1 ? `1px solid ${C.mist}` : "none",
+                opacity: hasPlayed_p ? 1 : 0.5,
+              }}>
+                {/* Rank */}
+                <div style={{width:18,fontSize:12,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",flexShrink:0}}>{p.rank}</div>
+                {/* Color bar */}
+                <div style={{width:3,height:28,borderRadius:2,background:tc,flexShrink:0}}/>
+                {/* Name + record */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif",
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                  <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>
+                    {hasPlayed_p ? p.record : "No matches yet"}
+                    {p.index!=null ? ` · HCP ${p.index}` : ""}
                   </div>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{p.name}</div>
-                      {isMe&&<span style={{...pill(C.forest,C.white),fontSize:9,padding:"1px 6px"}}>You</span>}
+                </div>
+                {/* Score */}
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  {sortBy==="Points"&&(
+                    <div style={{fontSize:16,fontWeight:700,color:hasPoints_p?tc:hasPlayed_p?C.gray:C.light,fontFamily:"Arial,sans-serif"}}>
+                      {hasPoints_p ? fmtPts(p.points) : hasPlayed_p ? "0" : "—"}
                     </div>
-                    <div style={{fontSize:11,color:hasPlayed_p?C.gray:C.light,fontFamily:"Arial,sans-serif",marginTop:1}}>
-                      HCP {p.index} · {statusLabel}
+                  )}
+                  {sortBy==="Record"&&(
+                    <div style={{fontSize:13,fontWeight:700,color:hasPlayed_p?tc:C.light,fontFamily:"Arial,sans-serif"}}>
+                      {hasPlayed_p ? p.record : "—"}
                     </div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    {sortBy==="Points"&&(
-                      <>
-                        <div style={{fontSize:16,fontWeight:700,
-                          color:hasPoints_p?teamColor(p.team):hasPlayed_p?C.gray:C.light,
-                          fontFamily:"Arial,sans-serif"}}>
-                          {hasPoints_p ? fmtPts(p.points) : hasPlayed_p ? "0 pts" : "—"}
-                        </div>
-                        {hasPlayed_p&&!hasPoints_p&&(
-                          <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>
-                            {p.l}L · {p.h}H
-                          </div>
-                        )}
-                      </>
-                    )}
-                    {sortBy==="Record"&&(
-                      <div style={{fontSize:14,fontWeight:700,color:hasPlayed_p?teamColor(p.team):C.light,fontFamily:"Arial,sans-serif"}}>
-                        {hasPlayed_p ? p.record : "—"}
-                      </div>
-                    )}
-                    {sortBy==="Money"&&(
-                      <div style={{fontSize:16,fontWeight:700,color:p.money>0?C.green:p.money<0?C.red:C.gray,fontFamily:"Arial,sans-serif"}}>
-                        {fmtMoney(p.money)}
-                      </div>
-                    )}
-                  </div>
+                  )}
+                  {sortBy==="Money"&&(
+                    <div style={{fontSize:14,fontWeight:700,color:p.money>0?C.green:p.money<0?C.red:C.gray,fontFamily:"Arial,sans-serif"}}>
+                      {fmtMoney(p.money)}
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
 
-          {/* Show All / Collapse toggle */}
-          {(hiddenCount > 0 || showAll) && (
+          {(hiddenCount>0||showAll)&&(
             <button onClick={()=>setShowAll(!showAll)}
-              style={{width:"100%",background:C.white,color:C.forest,border:`1.5px solid ${C.light}`,
-                borderRadius:14,padding:"11px 16px",fontSize:13,fontFamily:"Arial,sans-serif",
-                fontWeight:600,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,.05)",marginTop:2}}>
-              {showAll
-                ? "▲ Show less"
-                : `▼ Show all ${players.length} players (${hiddenCount} more)`}
+              style={{width:"100%",background:"none",border:"none",color:C.forest,fontSize:12,
+                fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",padding:"10px 0 2px",textAlign:"center"}}>
+              {showAll ? "▲ Show less" : `▼ Show all ${players.length} players`}
             </button>
           )}
 
-          {/* Zero-pt note */}
-          {!showAll && notPlayed.length > 0 && (
-            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",padding:"4px 0"}}>
-              {notPlayed.length} player{notPlayed.length!==1?"s":""} yet to play their first match
+          {!showAll&&notPlayed.length>0&&(
+            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",paddingTop:6}}>
+              {notPlayed.length} player{notPlayed.length!==1?"s":""} haven't played yet
             </div>
           )}
         </div>
 
-        <WHSBreakdown/>
       </div>
     </div>
   );
