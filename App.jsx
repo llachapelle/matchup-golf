@@ -5025,10 +5025,8 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
     }
   };
 
-  // Use real tripPlayers if available, fall back to RAW demo data
-  const displayPlayers = tripPlayers.length > 0
-    ? tripPlayers
-    : RAW.map(p=>({id:p.key, name:p.name, hcp_index:p.index, team:p.team, is_guest:false}));
+  // Only show real players — no demo fallback
+  const displayPlayers = tripPlayers.length > 0 ? tripPlayers : [];
 
   const redPlayers  = displayPlayers.filter(p=>p.team==="red");
   const bluePlayers = displayPlayers.filter(p=>p.team==="blue");
@@ -6769,19 +6767,27 @@ export default function App(){
       const myNameOnTrips = memberships.map(m=>m.name.toLowerCase());
 
       const allTripIds = [...new Set([...organizedTrips.map(t=>t.id), ...joinedTripIds])];
-      if(allTripIds.length === 0) { setLifetimeStats({}); return; }
 
+      // Fetch joined trip details first so we can filter to existing trips only
       let joinedTripDetails = [];
       if(joinedTripIds.length > 0){
         joinedTripDetails = await db.get("trips", `id=in.(${joinedTripIds.join(",")})&select=id,name,start_date`);
       }
+
+      // Only count trips that still exist in the DB (excludes deleted trips
+      // whose trip_players rows may still reference the old trip_id)
+      const existingTripIds = allTripIds.filter(id =>
+        organizedTrips.some(t=>t.id===id) || joinedTripDetails.some(t=>t.id===id)
+      );
+      if(existingTripIds.length === 0) { setLifetimeStats({}); return; }
+
       const allTripsById = Object.fromEntries(
         [...organizedTrips, ...joinedTripDetails].map(t=>[t.id, t])
       );
 
       // Fetch every completed match across all of this user's trips
       const allMatches = await db.get("matches",
-        `trip_id=in.(${allTripIds.join(",")})&status=eq.completed&select=*`);
+        `trip_id=in.(${existingTripIds.join(",")})&status=eq.completed&select=*`);
 
       // Aggregate per-trip and overall stats, matching by this user's lowercase
       // name(s) across trips (a person might be on multiple trips' rosters)
@@ -6815,7 +6821,7 @@ export default function App(){
 
       const totalPlayed = totalW + totalL + totalH;
       setLifetimeStats({
-        trips: allTripIds.length,
+        trips: existingTripIds.length,
         record: `${totalW}–${totalL}–${totalH}`,
         winPct: totalPlayed > 0 ? Math.round((totalW/totalPlayed)*100) : 0,
         totalPts,
