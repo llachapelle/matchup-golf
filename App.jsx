@@ -2833,65 +2833,100 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                       </div>
                     )}
                     {!course.yardages&&<div style={{marginBottom:6}}/>}
-                    {/* Per-player rows */}
-                    {[...p1Players,...p2Players].map((p,pi)=>{
-                      const isExt = p.isExternal;
-                      const sideTeam = pi<p1Players.length ? p1Team : p2Team;
-                      const sideColor = sideTeam==="red"?C.red:C.blue;
-                      // Tally gross scores for Out/In/Total
-                      let scoreOut=0, scoreIn=0, hasOut=false, hasIn=false;
-                      for(let h=1;h<=18;h++){
-                        const g = parseInt(holeScores[h]?.[p.key]);
-                        if(!isNaN(g)&&g>0){
-                          if(h<=9){ scoreOut+=g; hasOut=true; }
-                          else    { scoreIn+=g;  hasIn=true;  }
+                    {/* Scorecard rows: team-only for Scramble, per-player for everything else */}
+                    {isScramble ? (
+                      // Scramble: just two team rows using team_p1/team_p2 score keys
+                      [{key:"team_p1", label:match.p1, team:p1Team}, {key:"team_p2", label:match.p2, team:p2Team}].map(({key,label,team})=>{
+                        const teamColor2 = team==="red"?C.red:C.blue;
+                        const teamBg2    = team==="red"?C.redBg:C.blueBg;
+                        let scoreOut=0,scoreIn=0,hasOut=false,hasIn=false;
+                        for(let h=1;h<=18;h++){
+                          const g=parseInt(holeScores[h]?.[key]);
+                          if(!isNaN(g)&&g>0){
+                            if(h<=9){scoreOut+=g;hasOut=true;}
+                            else{scoreIn+=g;hasIn=true;}
+                          }
                         }
-                      }
-                      const scoreTot = scoreOut+scoreIn;
-                      const relOut = hasOut ? scoreOut-parOut : null;
-                      const relIn  = hasIn  ? scoreIn-parIn  : null;
-                      const relTot = (hasOut||hasIn) ? scoreTot-parTot : null;
-                      const relColor = n => n===0?C.charcoal:n>0?C.red:C.green;
-
-                      return(
-                        <div key={p.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
-                          <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:sideColor,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            {p.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
+                        const scoreTot=scoreOut+scoreIn;
+                        return(
+                          <div key={key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
+                            <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:teamColor2,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              {label}
+                            </div>
+                            {Array.from({length:18},(_,i)=>i+1).map(h=>{
+                              const gross=parseInt(holeScores[h]?.[key]);
+                              const hasScore=!isNaN(gross)&&gross>0;
+                              const par=course.pars[h-1]||4;
+                              const rel=hasScore?gross-par:null;
+                              const bg=rel===null?C.smoke:rel<=-1?C.greenBg:rel===0?C.white:C.redBg;
+                              return(
+                                <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                  <span style={{fontSize:10,fontWeight:600,color:hasScore?C.charcoal:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
+                                </div>
+                              );
+                            })}
+                            {totCell(hasOut?scoreOut:"·")}
+                            {totCell(hasIn?scoreIn:"·")}
+                            <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:C.charcoal,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              <span style={{fontSize:10,fontWeight:700,color:C.white,fontFamily:"Arial,sans-serif"}}>{(hasOut||hasIn)?scoreTot:"·"}</span>
+                            </div>
                           </div>
-                          {Array.from({length:18},(_,i)=>i+1).map(h=>{
-                            const gross = parseInt(holeScores[h]?.[p.key]);
-                            const hasScore = !isNaN(gross) && gross>0;
-                            const res = holeResults[h];
-                            const onWinningSide = (res==="p1"&&pi<p1Players.length) || (res==="p2"&&pi>=p1Players.length);
-                            let isBestOnSide = false;
-                            if(onWinningSide && hasScore){
-                              const sideKeys = pi<p1Players.length
-                                ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(x=>x.key)]
-                                : [...(match.p2Keys||[]), ...p2ExtPlayers.map(x=>x.key)];
-                              const scoresThisHole = holeScores[h]||{};
-                              const nets = sideKeys.map(k=>({key:k, net:getNetLive(k, scoresThisHole, h)}));
-                              const bestNet = Math.min(...nets.map(n=>n.net));
-                              isBestOnSide = nets.find(n=>n.key===p.key)?.net === bestNet;
-                            }
-                            const bg = isBestOnSide ? (sideTeam==="red"?C.redBg:C.blueBg) : C.smoke;
-                            const col = isBestOnSide ? sideColor : C.charcoal;
-                            return(
-                              <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                                <span style={{fontSize:10,fontWeight:isBestOnSide?700:500,color:hasScore?col:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
-                              </div>
-                            );
-                          })}
-                          {/* Out / In / Total totals */}
-                          {totCell(hasOut?scoreOut:"·")}
-                          {totCell(hasIn?scoreIn:"·")}
-                          <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:C.charcoal,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                            <span style={{fontSize:10,fontWeight:700,color:C.white,fontFamily:"Arial,sans-serif"}}>
-                              {(hasOut||hasIn)?scoreTot:"·"}
-                            </span>
+                        );
+                      })
+                    ) : (
+                      // All other formats: per-player rows
+                      [...p1Players,...p2Players].map((p,pi)=>{
+                        const isExt = p.isExternal;
+                        const sideTeam = pi<p1Players.length ? p1Team : p2Team;
+                        const sideColor = sideTeam==="red"?C.red:C.blue;
+                        let scoreOut=0, scoreIn=0, hasOut=false, hasIn=false;
+                        for(let h=1;h<=18;h++){
+                          const g = parseInt(holeScores[h]?.[p.key]);
+                          if(!isNaN(g)&&g>0){
+                            if(h<=9){ scoreOut+=g; hasOut=true; }
+                            else    { scoreIn+=g;  hasIn=true;  }
+                          }
+                        }
+                        const scoreTot = scoreOut+scoreIn;
+                        return(
+                          <div key={p.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
+                            <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:sideColor,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              {p.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
+                            </div>
+                            {Array.from({length:18},(_,i)=>i+1).map(h=>{
+                              const gross = parseInt(holeScores[h]?.[p.key]);
+                              const hasScore = !isNaN(gross) && gross>0;
+                              const res = holeResults[h];
+                              const onWinningSide = (res==="p1"&&pi<p1Players.length) || (res==="p2"&&pi>=p1Players.length);
+                              let isBestOnSide = false;
+                              if(onWinningSide && hasScore){
+                                const sideKeys = pi<p1Players.length
+                                  ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(x=>x.key)]
+                                  : [...(match.p2Keys||[]), ...p2ExtPlayers.map(x=>x.key)];
+                                const scoresThisHole = holeScores[h]||{};
+                                const nets = sideKeys.map(k=>({key:k, net:getNetLive(k, scoresThisHole, h)}));
+                                const bestNet = Math.min(...nets.map(n=>n.net));
+                                isBestOnSide = nets.find(n=>n.key===p.key)?.net === bestNet;
+                              }
+                              const bg = isBestOnSide ? (sideTeam==="red"?C.redBg:C.blueBg) : C.smoke;
+                              const col = isBestOnSide ? sideColor : C.charcoal;
+                              return(
+                                <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                  <span style={{fontSize:10,fontWeight:isBestOnSide?700:500,color:hasScore?col:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
+                                </div>
+                              );
+                            })}
+                            {totCell(hasOut?scoreOut:"·")}
+                            {totCell(hasIn?scoreIn:"·")}
+                            <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:C.charcoal,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              <span style={{fontSize:10,fontWeight:700,color:C.white,fontFamily:"Arial,sans-serif"}}>
+                                {(hasOut||hasIn)?scoreTot:"·"}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
                   </>);
                 })()}
               </div>
@@ -3759,28 +3794,54 @@ function SideGamesScreen({go, goBack}){
 // ─── WHS BREAKDOWN ────────────────────────────────────────────────────────────
 function WHSBreakdown(){
   const [open,setOpen]=useState(false);
-  const [ri,setRi]=useState(0);
-  const round=ROUNDS[ri],course=COURSES[round.courseId];
-  const players=buildPlayers(RAW.slice(0,4),course,round.format);
-  const lowestPH=Math.min(...players.map(p=>p.ph));
+  // Static illustrative example — no real player names or trip data
+  const exSlope=133, exRating=72.0, exPar=72;
+  const examples=[
+    {name:"Player A", index:8.4},
+    {name:"Player B", index:14.2},
+    {name:"Player C", index:20.1},
+    {name:"Player D", index:5.0},
+  ].map(p=>{
+    const ch=Math.round(p.index*(exSlope/113)+(exRating-exPar));
+    const ph=Math.round(ch*0.90);
+    return {...p,ch,ph};
+  });
+  const lowestPH=Math.min(...examples.map(p=>p.ph));
   return(
     <div style={{background:C.white,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,.06)"}}>
       <div onClick={()=>setOpen(!open)} style={{padding:"13px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
-        <div><div style={{fontSize:13,fontWeight:700,color:C.charcoal}}>WHS Handicap Breakdown</div>{!open&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>{course.name} · {round.format} · Tap to expand</div>}</div>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal}}>How WHS Handicaps Work</div>
+          {!open&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>Tap to see how strokes are calculated</div>}
+        </div>
         <span style={{fontSize:18,color:C.gray}}>{open?"▲":"▼"}</span>
       </div>
       {open&&(
-        <div style={{borderTop:`1px solid ${C.mist}`,padding:"12px 16px",display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",background:C.mist,borderRadius:8,padding:"6px 10px"}}>
-            Example calculation using demo data — your real handicaps are calculated during live scoring from your trip's actual course setup.
+        <div style={{borderTop:`1px solid ${C.mist}`,padding:"12px 16px",display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",background:C.mist,borderRadius:8,padding:"8px 10px",lineHeight:1.5}}>
+            Illustrative example · Slope {exSlope} · Rating {exRating} · Par {exPar} · Best Ball (90%)
           </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {ROUNDS.map((r,i)=>(<button key={r.id} onClick={()=>setRi(i)} style={{background:ri===i?C.forest:"transparent",color:ri===i?C.white:C.gray,border:`1.5px solid ${ri===i?C.forest:C.light}`,borderRadius:20,padding:"5px 12px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>{r.name}</button>))}
+          <div style={{display:"flex",gap:4}}>
+            {["Player","HCP Index","Course HCP","Playing HCP","Strokes Given"].map(h=>(
+              <div key={h} style={{flex:1,fontSize:9,fontFamily:"Arial,sans-serif",color:C.gray,fontWeight:700,textTransform:"uppercase",textAlign:"center",lineHeight:1.3}}>{h}</div>
+            ))}
           </div>
-          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{course.name} · {course.tee} Tees · Rating {course.rating} · Slope {course.slope} · Par {course.par} · {round.format}</div>
-          <div style={{display:"flex",gap:4}}>{["Player","Index","Course HCP","Playing HCP","Match Strokes"].map(h=>(<div key={h} style={{flex:1,fontSize:9,fontFamily:"Arial,sans-serif",color:C.gray,fontWeight:700,textTransform:"uppercase",textAlign:"center",lineHeight:1.3}}>{h}</div>))}</div>
-          {players.map(p=>(<div key={p.key} style={{display:"flex",gap:4,padding:"7px 0",borderBottom:`1px solid ${C.mist}`,alignItems:"center"}}><div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:700,color:teamColor(p.team),textAlign:"center"}}>{p.name}</div><div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,textAlign:"center"}}>{p.index}</div><div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,textAlign:"center"}}>{p.ch}</div><div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:700,textAlign:"center"}}>{p.ph}</div><div style={{flex:1,fontSize:13,fontFamily:"Arial,sans-serif",color:C.charcoal,fontWeight:700,textAlign:"center"}}>{p.ms===0?<span style={{color:C.gray}}>—</span>:`+${p.ms}`}</div></div>))}
-          <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",lineHeight:1.5,background:C.mist,borderRadius:10,padding:"8px 10px"}}>CH = Index × Slope÷113 + (Rating−Par)  ·  PH = CH × {round.format.toLowerCase().includes("singles")?"100%":"90%"}  ·  Match Strokes = diff from lowest PH ({lowestPH})</div>
+          {examples.map(p=>(
+            <div key={p.name} style={{display:"flex",gap:4,padding:"6px 0",borderBottom:`1px solid ${C.mist}`,alignItems:"center"}}>
+              <div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:C.charcoal,textAlign:"center"}}>{p.name}</div>
+              <div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,textAlign:"center"}}>{p.index}</div>
+              <div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",color:C.slate,textAlign:"center"}}>{p.ch}</div>
+              <div style={{flex:1,fontSize:12,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:700,textAlign:"center"}}>{p.ph}</div>
+              <div style={{flex:1,fontSize:13,fontFamily:"Arial,sans-serif",color:C.charcoal,fontWeight:700,textAlign:"center"}}>
+                {p.ph===lowestPH?<span style={{color:C.gray}}>—</span>:`+${p.ph-lowestPH}`}
+              </div>
+            </div>
+          ))}
+          <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",lineHeight:1.6,background:C.mist,borderRadius:10,padding:"8px 10px"}}>
+            <strong>Course HCP</strong> = Index × Slope÷113 + (Rating−Par){"\n"}
+            <strong>Playing HCP</strong> = Course HCP × 90% (Best Ball/Scramble) or 100% (Singles){"\n"}
+            <strong>Strokes</strong> = difference from the lowest Playing HCP in the match
+          </div>
         </div>
       )}
     </div>
@@ -3873,7 +3934,7 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
 
           {/* Player rows */}
           {visiblePlayers.map(p=>{
-            const isMe        = p.key==="louie";
+            const isMe        = false; // "You" badge handled via Profile screen
             const hasPlayed_p = p.played > 0;
             const hasPoints_p = p.points > 0;
             const statusLabel = !hasPlayed_p ? "No matches yet"
@@ -3952,18 +4013,6 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
         </div>
 
         <WHSBreakdown/>
-        <div style={card()}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontSize:14,fontWeight:700,color:C.charcoal}}>Side Games</div>
-            <span onClick={()=>go("sidegames")} style={{fontSize:12,color:C.forest,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>Full View →</span>
-          </div>
-          {[{name:"Nassau",leader:"Red +$10 (F9)",detail:"Round 1 in progress"},{name:"Skins",leader:"Louie leading (2 skins)",detail:"Round 2 · $10/skin"}].map((g,i)=>(
-            <div key={g.name} style={{padding:"8px 0",borderBottom:i<1?`1px solid ${C.mist}`:"none"}}>
-              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{g.name}</span><span style={{fontSize:13,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif"}}>{g.leader}</span></div>
-              <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>{g.detail}</div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -4787,7 +4836,7 @@ function ProfileScreen({go, goBack, matches, playerRecords, onSignOut, session, 
   );
 }
 function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch, userInitials}){
-  const [section,   setSection]  = useState("Players");
+  const [section,   setSection]  = useState("Matches");
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [newName,   setNewName]  = useState("");
   const [newHcp,    setNewHcp]   = useState("");
