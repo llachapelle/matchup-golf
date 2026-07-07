@@ -5523,6 +5523,12 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
     ? tripPlayers
     : RAW.map(p=>({id:p.key, name:p.name, hcp_index:p.index, team:p.team}));
 
+  // Filter players by their assigned team so Side 1 (red) only shows red
+  // players and Side 2 (blue) only shows blue players — prevents someone
+  // from accidentally putting a blue team player on the red side.
+  const redPlayers  = displayPlayers.filter(p=>(p.team||"red")==="red");
+  const bluePlayers = displayPlayers.filter(p=>(p.team||"red")==="blue");
+
   const [p1Players,      setP1Players]     = useState(()=>
     isEdit ? displayPlayers.filter(p=>(editMatch.p1Keys||[]).includes(p.name?.toLowerCase())) : []
   );
@@ -5878,7 +5884,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           </div>
           <div style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,marginBottom:10,minHeight:20}}>{p1Label}</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-            {displayPlayers.map(p=>{
+            {redPlayers.map(p=>{
               const sel=p1Players.find(pl=>pl.id===p.id);
               const inP2=p2Players.find(pl=>pl.id===p.id);
               return(
@@ -5891,6 +5897,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
                 </button>
               );
             })}
+            {redPlayers.length===0&&<div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>No red team players — assign teams in Trip → Players</div>}
           </div>
         </div>
 
@@ -5905,7 +5912,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           </div>
           <div style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,marginBottom:10,minHeight:20}}>{p2Label}</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-            {displayPlayers.map(p=>{
+            {bluePlayers.map(p=>{
               const sel=p2Players.find(pl=>pl.id===p.id);
               const inP1=p1Players.find(pl=>pl.id===p.id);
               return(
@@ -5918,6 +5925,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
                 </button>
               );
             })}
+            {bluePlayers.length===0&&<div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>No blue team players — assign teams in Trip → Players</div>}
           </div>
         </div>
 
@@ -6694,6 +6702,7 @@ export default function App(){
 
   const handleTripCreated = useCallback(async (trip) => {
     await loadTrip(trip);
+    setScreen("creatematch");
   }, [loadTrip]);
 
   // Quick Match: silently creates a minimal shadow trip so all match/scoring
