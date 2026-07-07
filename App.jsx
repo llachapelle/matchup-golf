@@ -4981,11 +4981,15 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
     setEditName(p.name);
     setEditHcp(p.hcp_index!=null ? String(p.hcp_index) : "");
     setEditTeam(p.team||"red");
+    setEditError("");
+    setConfirmDeletePlayer(false);
   };
 
+  const [editError, setEditError] = useState("");
+
   const savePlayerEdit = async () => {
-    if(!editingPlayer?.id){ setEditingPlayer(null); return; }
-    setSavingEdit(true);
+    if(!editingPlayer?.id){ setEditError("No player ID — cannot save"); return; }
+    setSavingEdit(true); setEditError("");
     try {
       const updates = {
         name:      editName.trim() || editingPlayer.name,
@@ -4993,12 +4997,14 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
         team:      editTeam,
       };
       await db.patch("trip_players", `id=eq.${editingPlayer.id}`, updates);
-      // Reload from DB to ensure fresh data on next render
-      const [fresh] = await db.get("trip_players", `id=eq.${editingPlayer.id}&select=*`);
-      if(fresh) onUpdatePlayer?.(fresh);
-    } catch(e){ console.warn("Failed to save player:", e.message); }
-    setSavingEdit(false);
-    setEditingPlayer(null);
+      const fresh = await db.get("trip_players", `id=eq.${editingPlayer.id}&select=*`);
+      if(fresh.length) onUpdatePlayer?.(fresh[0]);
+      setSavingEdit(false);
+      setEditingPlayer(null);
+    } catch(e){
+      setEditError(e.message||"Save failed");
+      setSavingEdit(false);
+    }
   };
 
   const deletePlayer = async () => {
@@ -5007,12 +5013,16 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
   };
 
   const confirmDeletePlayerFn = async () => {
+    setEditError("");
     try {
       await db.delete("trip_players", `id=eq.${editingPlayer.id}`);
       onDeletePlayer?.(editingPlayer.id);
-    } catch(e){ console.warn("Failed to delete player:", e.message); }
-    setConfirmDeletePlayer(false);
-    setEditingPlayer(null);
+      setConfirmDeletePlayer(false);
+      setEditingPlayer(null);
+    } catch(e){
+      setEditError(e.message||"Delete failed");
+      setConfirmDeletePlayer(false);
+    }
   };
 
   // Use real tripPlayers if available, fall back to RAW demo data
@@ -5179,6 +5189,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                   width:"100%",display:"flex",flexDirection:"column",gap:14}}>
                 <div style={{width:36,height:4,background:C.light,borderRadius:2,margin:"0 auto 4px"}}/>
                 <div style={{fontSize:16,fontWeight:700,color:C.charcoal}}>Edit Player</div>
+                {editError&&<div style={{background:C.redBg,borderRadius:8,padding:"8px 12px",fontSize:12,color:C.red,fontFamily:"Arial,sans-serif"}}>{editError}</div>}
 
                 {!confirmDeletePlayer ? (<>
                   <div>
