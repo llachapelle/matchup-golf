@@ -5086,12 +5086,22 @@ function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
   };
 
   const pickCourse = async (course) => {
-    // Populate name/city/state immediately from search result
-    setName(course.club_name || course.course_name || "");
-    setCity(course.city || "");
-    setState(course.state_name || course.state || "");
+    // The API has club_name (the club) and course_name (the specific course,
+    // e.g. "Quarry" or "Legend" at a resort with multiple courses).
+    // Use "Club Name - Course Name" when they differ, just club name when same.
+    const clubName = course.club_name || "";
+    const courseName = course.course_name || "";
+    const displayName = courseName && courseName !== clubName
+      ? `${clubName} - ${courseName}`
+      : clubName;
 
-    // Fetch full detail to get tee boxes with slope/rating/holes
+    // location is nested: { city, state, country }
+    const loc = course.location || {};
+    setName(displayName);
+    setCity(loc.city || "");
+    setState(loc.state || "");
+
+    // Fetch full detail for tee box data
     if(course.id){
       try {
         const res = await fetch(
@@ -5100,23 +5110,36 @@ function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
         );
         const data = await res.json();
         const detail = data.course || data;
-        if(detail.tees?.length){
-          setTees(detail.tees.map(t=>({
-            name:    t.tee_name || t.name || "Blue",
-            color:   (t.tee_name||t.name||"blue").toLowerCase().replace(/[^a-z]/g,"").slice(0,8),
-            slope:   t.slope_rating    ? String(t.slope_rating)   : "",
-            rating:  t.course_rating   ? String(t.course_rating)  : "",
-            par:     t.par             ? String(t.par)            : "72",
-            yardage: t.total_yards     ? String(t.total_yards)    : "",
-            holes:   (t.holes||[]).map((h,i)=>({
-              hole:        i+1,
-              par:         h.par         || 4,
-              yardage:     h.yardage     || 0,
-              strokeIndex: h.handicap    || (i+1),
-            })),
-          })));
+
+        // API splits tees into tees.male[] and tees.female[] — combine both,
+        // labelling female tees so organizers can include them if needed.
+        const maleTees   = detail.tees?.male   || [];
+        const femaleTees = detail.tees?.female || [];
+        const allTees    = [...maleTees, ...femaleTees];
+
+        if(allTees.length){
+          setTees(allTees.map(t=>{
+            const teeName = t.tee_name || "Blue";
+            // Normalize color from tee name (e.g. "Blue" → "blue", "Blue/Gold" → "blue")
+            const color = teeName.toLowerCase().split(/[\s/\-]/)[0].replace(/[^a-z]/g,"") || "blue";
+            return {
+              name:    teeName,
+              color:   color,
+              slope:   t.slope_rating  ? String(t.slope_rating)  : "",
+              rating:  t.course_rating ? String(t.course_rating) : "",
+              par:     t.par_total     ? String(t.par_total)     : "72",
+              yardage: t.total_yards   ? String(t.total_yards)   : "",
+              // holes[] has { par, yardage, handicap } — maps directly to our format
+              holes:   (t.holes||[]).map((h,i)=>({
+                hole:        i+1,
+                par:         h.par      || 4,
+                yardage:     h.yardage  || 0,
+                strokeIndex: h.handicap || (i+1),
+              })),
+            };
+          }));
         }
-      } catch(e){ /* tee fetch failed — manual entry still works */ }
+      } catch(e){ /* tee fetch failed — user can still enter manually */ }
     }
 
     setResults(null); setSearchQ("");
@@ -5201,13 +5224,20 @@ function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
             {/* Search results */}
             {results&&results.length>0&&(
               <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6}}>
-                {results.slice(0,8).map(c=>(
-                  <button key={c.id||c.club_name} onClick={()=>pickCourse(c)}
-                    style={{textAlign:"left",background:C.smoke,border:`1px solid ${C.light}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",width:"100%"}}>
-                    <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{c.club_name||c.course_name}</div>
-                    {(c.city||c.state_name)&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>{[c.city,c.state_name].filter(Boolean).join(", ")}</div>}
-                  </button>
-                ))}
+                {results.slice(0,8).map(c=>{
+                  const loc = c.location || {};
+                  const clubName = c.club_name || c.course_name || "";
+                  const courseName = c.course_name && c.course_name !== c.club_name ? c.course_name : null;
+                  const locStr = [loc.city, loc.state].filter(Boolean).join(", ");
+                  return(
+                    <button key={c.id} onClick={()=>pickCourse(c)}
+                      style={{textAlign:"left",background:C.smoke,border:`1px solid ${C.light}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",width:"100%"}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{clubName}</div>
+                      {courseName&&<div style={{fontSize:12,color:C.forest,fontFamily:"Arial,sans-serif",fontWeight:600,marginTop:1}}>📍 {courseName}</div>}
+                      {locStr&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>{locStr}</div>}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
