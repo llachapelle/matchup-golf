@@ -5594,7 +5594,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
                             <div style={{textAlign:"left"}}>
                               <div style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif"}}>{t.name}</div>
                               <div style={{fontSize:10,fontFamily:"Arial,sans-serif",opacity:.8}}>
-                                {t.slope} / {t.rating} / Par {t.par}
+                                {t.slope} / {t.rating} / Par {t.par}{t.yardage?` / ${t.yardage}y`:""}
                               </div>
                             </div>
                           </button>
@@ -5616,7 +5616,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
             <div style={{background:C.greenBg,borderRadius:10,padding:"10px 13px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
                 <div style={{fontSize:12,fontWeight:700,color:C.green,fontFamily:"Arial,sans-serif"}}>{selectedCourse.name} — {selectedTee.name} Tees</div>
-                <div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>Slope {selectedTee.slope} · Rating {selectedTee.rating} · Par {selectedTee.par}</div>
+                <div style={{fontSize:11,color:C.forest,fontFamily:"Arial,sans-serif"}}>Slope {selectedTee.slope} · Rating {selectedTee.rating} · Par {selectedTee.par}{selectedTee.yardage?` · ${selectedTee.yardage}y`:""}</div>
               </div>
               <div style={{fontSize:16}}>✓</div>
             </div>
