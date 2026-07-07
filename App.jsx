@@ -5930,20 +5930,20 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           </div>
         </div>
 
-        {/* Preview */}
-        {p1Players.length>0&&p2Players.length>0&&(
-          <div style={{background:C.mist,borderRadius:14,padding:"14px 16px",textAlign:"center"}}>
-            <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:4}}>{format}</div>
-            <div style={{fontSize:15,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
-              {p1Label} <span style={{color:C.gray,fontWeight:400}}>vs</span> {p2Label}
-            </div>
+        {/* Preview — show even with TBD players */}
+        <div style={{background:C.mist,borderRadius:14,padding:"14px 16px",textAlign:"center"}}>
+          <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:4}}>{format}</div>
+          <div style={{fontSize:15,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
+            {p1Label} <span style={{color:C.gray,fontWeight:400}}>vs</span> {p2Label}
           </div>
-        )}
+          {(!p1Players.length||!p2Players.length)&&(
+            <div style={{fontSize:11,color:C.amber,fontFamily:"Arial,sans-serif",marginTop:4}}>Players TBD — can be assigned before the round</div>
+          )}
+        </div>
 
-        <button onClick={saveMatch} disabled={saving||!p1Players.length||!p2Players.length}
+        <button onClick={saveMatch} disabled={saving}
           style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{
             boxShadow:"0 6px 20px rgba(27,67,50,.25)",
-            opacity:(!p1Players.length||!p2Players.length)?.5:1
           })}>
           {saving?(isEdit?"Saving…":"Creating Match…"):(isEdit?"Save Changes →":"Create Match →")}
         </button>
