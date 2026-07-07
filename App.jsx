@@ -1334,406 +1334,310 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
 
 // ─── MATCHES ──────────────────────────────────────────────────────────────────
 function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userInitials}){
-  const [filter,setFilter]=useState("All");
-  const [dayFilter,setDayFilter]=useState("All Days");
-  const [expandedMatch,setExpandedMatch]=useState(null);
-  const days=["All Days",...Array.from(new Set(matches.map(m=>m.day)))];
-  // Group by each match's REAL day + course (set during match creation) —
-  // not the fixed 5-day demo ROUNDS array, which only ever matched round id 1
-  // and silently mislabeled every real match's course with fake demo data.
-  const groupKey = m => `${m.day||"Trip Day"}__${m.course_name||"Course TBD"}`;
-  const grouped = Array.from(new Set(matches.map(groupKey))).map(key=>{
-    const [day, courseName] = key.split("__");
-    return { day, course: courseName, matches: matches.filter(m=>groupKey(m)===key) };
-  }).filter(r=>r.matches.length>0);
+  const [expandedMatch,   setExpandedMatch]   = useState(null);
+  const [showCompleted,   setShowCompleted]   = useState({}); // { [dateKey]: bool }
+  const today = new Date().toISOString().split("T")[0];
 
-  // "My Matches" filter uses the actual logged-in player's name, not a
-  // hardcoded "Louie" — falls back gracefully if no real player is found.
+  // Format a date string for display — "Today", "Tomorrow", "Mon Jul 7", etc.
+  const fmtDate = (dateStr) => {
+    if(!dateStr) return "Unscheduled";
+    if(dateStr === today) return "Today";
+    const d = new Date(dateStr+"T12:00:00"); // noon local to avoid timezone shift
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
+    if(dateStr === tomorrow.toISOString().split("T")[0]) return "Tomorrow";
+    return d.toLocaleDateString("en-US", {weekday:"short", month:"short", day:"numeric"});
+  };
+
+  // Group matches by date + course, sorted so today is first, future next,
+  // then past dates in reverse (most recent past at top of the past section).
+  const grouped = (() => {
+    const byKey = {};
+    matches.filter(m=>m.status!=="deleted").forEach(m=>{
+      const date = m.match_date || "unscheduled";
+      const course = m.course_name || "Course TBD";
+      const key = `${date}__${course}`;
+      if(!byKey[key]) byKey[key] = {date, course, matches:[]};
+      byKey[key].matches.push(m);
+    });
+    return Object.values(byKey).sort((a,b)=>{
+      // Today first, then future dates ascending, then past dates descending
+      const ad = a.date, bd = b.date;
+      if(ad===bd) return 0;
+      if(ad==="unscheduled") return 1;
+      if(bd==="unscheduled") return -1;
+      const aIsFuture = ad >= today, bIsFuture = bd >= today;
+      if(aIsFuture && bIsFuture) return ad.localeCompare(bd); // ascending future
+      if(!aIsFuture && !bIsFuture) return bd.localeCompare(ad); // descending past
+      return aIsFuture ? -1 : 1; // future before past
+    });
+  })();
+
+  // "My Matches" filter
   const myName = (tripPlayers?.find(p=>p.user_id) || tripPlayers?.[0])?.name?.toLowerCase() || "";
-  const visible = grouped
-    .filter(r=>dayFilter==="All Days"||r.day===dayFilter)
-    .map(r=>({...r,matches:r.matches.filter(m=>
-      filter==="All"||(filter==="My Matches"&&myName&&((m.p1Keys||[]).includes(myName)||(m.p2Keys||[]).includes(myName)))||
-      (filter==="Live"&&m.status==="live")||(filter==="Completed"&&m.status==="completed")
-    )})).filter(r=>r.matches.length>0);
 
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <Header sub="⛳ MatchUp Golf" title="Matches" detail={activeTrip?.name||"Trip"} onProfile={()=>go("profile")} initials={userInitials}/>
-      <div style={{background:C.white,paddingTop:10,borderBottom:`1px solid ${C.light}`}}>
-        <div style={{display:"flex",gap:6,padding:"0 16px 8px",overflowX:"auto"}}>
-          {days.map(d=><button key={d} onClick={()=>setDayFilter(d)} style={{background:dayFilter===d?C.charcoal:"transparent",color:dayFilter===d?C.white:C.slate,border:`1.5px solid ${dayFilter===d?C.charcoal:C.light}`,borderRadius:20,padding:"5px 13px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{d}</button>)}
-        </div>
-        <div style={{display:"flex",gap:6,padding:"0 16px 10px",overflowX:"auto"}}>
-          {["All","My Matches","Live","Completed"].map(f=><button key={f} onClick={()=>setFilter(f)} style={{background:filter===f?C.forest:"transparent",color:filter===f?C.white:C.gray,border:`1.5px solid ${filter===f?C.forest:C.light}`,borderRadius:20,padding:"5px 12px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{f}</button>)}
-        </div>
-      </div>
-      <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:16,overflowY:"auto"}}>
-        {visible.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:C.gray,fontFamily:"Arial,sans-serif",fontSize:14}}>No matches for this filter.</div>}
-        {visible.map(r=>(
-          <div key={`${r.day}__${r.course}`}>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:11,fontFamily:"Arial,sans-serif",color:C.gray,letterSpacing:.8,textTransform:"uppercase",fontWeight:700}}>{r.day}</div>
-              <div style={{fontSize:15,fontWeight:700,color:C.charcoal,margin:"2px 0"}}>📍 {r.course}</div>
-            </div>
-            {r.matches.map(m=>{
-              const isExpanded = expandedMatch===m.id;
-              const handleTap = () => {
-                if(m.status==="live")      { goMatch(m.id,"live"); return; }
-                if(m.status==="upcoming")  { goMatch(m.id,"live"); return; } // start scoring
-                if(m.status==="completed") { setExpandedMatch(isExpanded?null:m.id); }
-              };
+      <div style={{flex:1,padding:16,display:"flex",flexDirection:"column",gap:20,overflowY:"auto"}}>
+        {grouped.length===0&&(
+          <div style={{textAlign:"center",padding:"40px 20px",color:C.gray,fontFamily:"Arial,sans-serif",fontSize:14}}>
+            No matches yet — tap + to create one.
+          </div>
+        )}
+        {grouped.map(group=>{
+          const key = `${group.date}__${group.course}`;
+          const isToday = group.date === today;
+          const isPast  = group.date < today && group.date !== "unscheduled";
+          const active  = group.matches.filter(m=>m.status!=="completed");
+          const done    = group.matches.filter(m=>m.status==="completed");
+          const showDone = showCompleted[key];
 
-              // Team colors — real trip roster first, RAW demo data as fallback
-              const p1Team = (m.p1Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "red";
-              const p2Team = (m.p2Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "blue";
-
-              // For completed: winner on top. For live: leading team on top. For upcoming: p1 on top.
-              let topSide="p1"; // default
-              if(m.status==="completed"){
-                topSide = m.winnerSide==="halve" ? "p1" : m.winnerSide==="p1" ? "p1" : "p2";
-              } else if(m.status==="live" && m.liveScore){
-                const ls = m.liveScore.toLowerCase();
-                if(ls.includes("red") && ls.includes("up")) topSide = p1Team==="red" ? "p1" : "p2";
-                else if(ls.includes("blue") && ls.includes("up")) topSide = p1Team==="blue" ? "p1" : "p2";
-                else topSide = "p1"; // All Square
-              }
-
-              const topLabel    = topSide==="p1" ? m.p1 : m.p2;
-              const bottomLabel = topSide==="p1" ? m.p2 : m.p1;
-              const topKeys     = topSide==="p1" ? (m.p1Keys||[]) : (m.p2Keys||[]);
-              const bottomKeys  = topSide==="p1" ? (m.p2Keys||[]) : (m.p1Keys||[]);
-              const topTeam     = topSide==="p1" ? p1Team : p2Team;
-              const bottomTeam  = topSide==="p1" ? p2Team : p1Team;
-              const topColor    = topTeam==="red" ? C.red : C.blue;
-              const bottomColor = bottomTeam==="red" ? C.red : C.blue;
-              const topIsWinner = m.status==="completed" && m.winnerSide!=="halve" && topSide!=="p1" ? m.winnerSide==="p2" : m.status==="completed" && m.winnerSide!=="halve";
-              // Simpler: top is always the better side for completed/live
-              const isHalve = m.winnerSide==="halve";
-              const isScr = isScrambleFormat(m);
-              const scrDisplay = isScr ? getScrambleDisplay(m, tripPlayers) : null;
-              const isXB = isXBallFormat(m);
-              const xbDisplay = isXB ? getXBallDisplay(m, tripPlayers) : null;
-
-              return(
-                <div key={m.id} style={{...card({marginBottom:8,border:
-                  m.status==="live"?`1.5px solid ${C.mint}`:
-                  isExpanded?`1.5px solid ${C.forest}33`:`1px solid ${C.mist}`
-                })}}>
-                  <div onClick={handleTap} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:m.status==="upcoming"?"default":"pointer"}}>
-                    <div>
-                      {m.status==="live"&&<div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE</span></div>}
-                      {m.status==="completed"&&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:3}}>✓ FINAL</div>}
-                      {(()=>{
-                        // Determine if there's a clear leader/winner to highlight
-                        const hasLeader = (m.status==="completed" && !isHalve) ||
-                          (m.status==="live" && m.liveScore && !m.liveScore.toLowerCase().includes("square"));
-                        const topFW    = hasLeader ? 700 : 500;
-                        const bottomFW = hasLeader ? 400 : 500;
-                        const topCol   = hasLeader ? topColor : C.charcoal;
-                        const botCol   = C.gray;
-
-                        // Scramble: clean "Team Red / Team Blue" labels, no leader bolding (stroke play, not match play)
-                        if(isScr){
-                          return(<>
-                            <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p1Team==="red"?C.red:C.blue}}>
-                              {scrDisplay.p1Label}
-                            </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1}</div>
-                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:scrDisplay.p2Team==="red"?C.red:C.blue,marginTop:3}}>
-                              {scrDisplay.p2Label}
-                            </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2}</div>
-                            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
-                              <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
-                              {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
-                            </div>
-                          </>);
-                        }
-
-                        // X-Ball (20/40 Ball): show banked progress + net score-to-par per side
-                        if(isXB){
-                          return(<>
-                            <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p1Team==="red"?C.red:C.blue}}>
-                              {xbDisplay.p1Label} {xbDisplay.p1Net&&<span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p1Net}</span>} <span style={{color:C.gray,fontWeight:500}}>· {xbDisplay.p1Banked}/{xbDisplay.target}</span>
-                            </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1}</div>
-                            <div style={{fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,color:xbDisplay.p2Team==="red"?C.red:C.blue,marginTop:3}}>
-                              {xbDisplay.p2Label} {xbDisplay.p2Net&&<span style={{color:C.charcoal,fontWeight:700}}>{xbDisplay.p2Net}</span>} <span style={{color:C.gray,fontWeight:500}}>· {xbDisplay.p2Banked}/{xbDisplay.target}</span>
-                            </div>
-                            <div style={{fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:-1}}>{(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2}</div>
-                            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
-                              <span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>
-                              {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
-                            </div>
-                          </>);
-                        }
-
-                        return(<>
-                          <div style={{fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:topFW,color:topCol}}>
-                            {topLabel}
-                            {m.status==="completed"&&!isHalve&&<span style={{fontSize:10,marginLeft:4}}>★</span>}
-                          </div>
-                          <div style={{fontSize:12,color:botCol,fontFamily:"Arial,sans-serif",marginTop:2,fontWeight:bottomFW}}>
-                            vs {bottomLabel}
-                          </div>
-                          {/* Format / course info */}
-                          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
-                            {m.format&&m.format!=="Best Ball"&&<span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>}
-                            {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</span>}
-                            {m.hcp_mode&&m.hcp_mode!=="whs"&&<span style={{...pill(C.amberBg,C.amber),fontSize:10}}>{m.hcp_mode==="off"?"No HCP":`HCP ${m.hcp_pct}%`}</span>}
-                          </div>
-                        </>);
-                      })()}
-                    </div>
-                    <div style={{textAlign:"right"}}>
-                      {isScr&&m.status==="live"&&<>
-                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
-                          <span style={{fontSize:13,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p1Team==="red"?C.red:C.blue}}>{scrDisplay.p1ScoreToPar||"—"}</span>
-                          {scrDisplay.h1>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {scrDisplay.h1}</span>}
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
-                          <span style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",color:scrDisplay.p2Team==="red"?C.red:C.blue}}>{scrDisplay.p2ScoreToPar||"—"}</span>
-                          {scrDisplay.h2>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {scrDisplay.h2}</span>}
-                        </div>
-                        <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
-                      </>}
-                      {isXB&&m.status==="live"&&<>
-                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
-                          <span style={{fontSize:13,fontWeight:700,fontFamily:"Arial,sans-serif",color:xbDisplay.p1Team==="red"?C.red:C.blue}}>{xbDisplay.p1Net||"—"}</span>
-                          {xbDisplay.p1Banked>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {xbDisplay.p1Banked}</span>}
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
-                          <span style={{fontSize:12,fontWeight:700,fontFamily:"Arial,sans-serif",color:xbDisplay.p2Team==="red"?C.red:C.blue}}>{xbDisplay.p2Net||"—"}</span>
-                          {xbDisplay.p2Banked>0&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {xbDisplay.p2Banked}</span>}
-                        </div>
-                        <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
-                      </>}
-                      {!isScr&&!isXB&&m.status==="live"&&<>
-                        <div style={{fontSize:14,fontWeight:700,fontFamily:"Arial,sans-serif",color:scoreColor(m.liveScore)}}>{m.liveScore}</div>
-                        <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>thru {m.thru}</div>
-                        <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
-                      </>}
-                      {m.status==="upcoming"&&<div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>⏰ {m.time}</div>}
-                      {m.status==="completed"&&(()=>{
-                        const wt=matchWinningTeam(m, tripPlayers);
-                        const isHalve=wt==="halve"||m.winnerSide==="halve";
-                        const winColor=wt==="red"?C.red:wt==="blue"?C.blue:C.slate;
-                        const winLabel=isHalve?"All Square":`${wt==="red"?"Red":"Blue"} wins ${m.score}`;
-                        const ptLabel=isHalve?"½ pt each":"+1 pt";
-                        const pillBg=isHalve?C.mist:wt==="red"?C.redBg:C.blueBg;
-                        const pillCol=isHalve?C.slate:wt==="red"?C.red:C.blue;
-                        return(<>
-                          <div style={{fontSize:13,fontWeight:700,color:winColor,fontFamily:"Arial,sans-serif"}}>{winLabel}</div>
-                          <div style={{...pill(pillBg,pillCol),fontSize:10,marginTop:4}}>{ptLabel}</div>
-                          <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:4}}>{isExpanded?"▲ collapse":"▼ details"}</div>
-                        </>);
-                      })()}
+          return(
+            <div key={key}>
+              {/* Round header */}
+              <div style={{marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                    {isToday&&<div style={{background:C.forest,color:C.white,borderRadius:10,padding:"1px 8px",fontSize:10,fontWeight:700,fontFamily:"Arial,sans-serif"}}>TODAY</div>}
+                    <div style={{fontSize:12,fontWeight:700,color:isPast?C.gray:C.charcoal,fontFamily:"Arial,sans-serif",textTransform:"uppercase",letterSpacing:.6}}>
+                      {fmtDate(group.date)}
                     </div>
                   </div>
-                  {isExpanded&&m.status==="completed"&&(()=>{
-                    // Use THIS match's own saved course data (slope/rating/par/
-                    // hole_data) — not a demo ROUNDS lookup that only ever
-                    // matched a fake "round 1" and silently substituted the
-                    // wrong course's numbers into every handicap calculation.
-                    const realHoleData = (() => {
-                      if(!m.hole_data) return null;
-                      try {
-                        const parsed = typeof m.hole_data==="string" ? JSON.parse(m.hole_data) : m.hole_data;
-                        if(Array.isArray(parsed)&&parsed.length===18) return parsed;
-                      } catch(e){}
-                      return null;
-                    })();
-                    const course2 = {
-                      slope: m.slope || COURSES.mammoth.slope,
-                      rating: m.rating || COURSES.mammoth.rating,
-                      par: m.par || COURSES.mammoth.par,
-                      strokeIndex: realHoleData ? realHoleData.map(h=>h.strokeIndex) : COURSES.mammoth.strokeIndex,
-                      pars: realHoleData ? realHoleData.map(h=>h.par) : COURSES.mammoth.pars,
-                      name: m.course_name || COURSES.mammoth.name,
-                    };
-                    const allMatchKeys = [...(m.p1Keys||[]),...(m.p2Keys||[])];
-                    const realInM = tripPlayers?.length
-                      ? tripPlayers.filter(tp=>allMatchKeys.includes(tp.name.toLowerCase()))
-                          .map(tp=>({key:tp.name.toLowerCase(), name:tp.name, index:tp.hcp_index||0, team:tp.team||"red"}))
-                      : RAW.filter(p=>allMatchKeys.includes(p.key));
-                    const builtP=buildPlayers(realInM,course2,m.format||"Best Ball");
-                    const pByKey=Object.fromEntries(builtP.map(p=>[p.key,p]));
-                    const hs=m.holeScores||{};
-                    const allHoles=Array.from({length:18},(_,i)=>i+1).filter(h=>hs[h]&&Object.keys(hs[h]).length>0);
-                    const wt=matchWinningTeam(m, tripPlayers);
-                    return(
-                      <div style={{borderTop:`1px solid ${C.mist}`,marginTop:10,paddingTop:10}}>
-                        {/* Match info + edit */}
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                          <div>
-                            <div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif",fontWeight:600}}>{m.format||"Best Ball"}{m.course_name?` · ${m.course_name}`:""}</div>
-                            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>Played {m.day} · {course2.name}</div>
-                          </div>
-                          <button onClick={e=>{e.stopPropagation();goMatch(m.id,"matchedit");}}
-                            style={{background:C.forest,color:C.white,border:"none",borderRadius:10,padding:"7px 14px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
-                            ✏️ Edit
-                          </button>
-                        </div>
-
-                        {/* Player scorecards — winning side first, then losing side */}
-                        {[{label:m.p1,keys:m.p1Keys||[],pairingStr:m.p1,isWinner:m.winnerSide==="p1"},
-                          {label:m.p2,keys:m.p2Keys||[],pairingStr:m.p2,isWinner:m.winnerSide==="p2"}]
-                          .sort((a,b)=>b.isWinner-a.isWinner) // winner always on top
-                          .map(side=>{
-                          const teamCol=side.keys.length&&resolvePlayerTeam(side.keys[0],tripPlayers)==="red"?C.red:C.blue;
-                          const rawKeys = side.keys;
-                          const rawNames = rawKeys.map(k=>RAW.find(p=>p.key===k)?.name||"");
-                          const extNames = side.pairingStr.split("/").map(n=>n.trim())
-                            .filter(n=>n&&!rawNames.some(rn=>rn.toLowerCase()===n.toLowerCase()));
-                          const extKeys = extNames.map(n=>n.toLowerCase());
-                          const allKeys = [...rawKeys,...extKeys];
-                          return(
-                            <div key={side.label} style={{marginBottom:10}}>
-                              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
-                                <div style={{
-                                  fontSize:11,
-                                  fontWeight: side.isWinner ? 800 : 500,
-                                  color: side.isWinner ? teamCol : C.gray,
-                                  fontFamily:"Arial,sans-serif",
-                                  textTransform:"uppercase",
-                                  letterSpacing:.5,
-                                }}>{side.label}</div>
-                                {side.isWinner
-                                  ? <span style={{...pill(teamCol===C.red?C.redBg:C.blueBg,teamCol),fontSize:9}}>Winner ★</span>
-                                  : <span style={{...pill(C.mist,C.gray),fontSize:9}}>Lost</span>
-                                }
-                              </div>
-                              {allKeys.map(key=>{
-                                const rawPlayer  = RAW.find(p=>p.key===key);
-                                const builtPlayer= pByKey[key];
-                                const guestPlayer= !rawPlayer ? GUEST_PLAYERS[key] : null;
-                                const isExt      = !rawPlayer;
-                                const hasHcp     = !!builtPlayer || !!guestPlayer; // has handicap data
-                                const displayName= rawPlayer?.name||(key.charAt(0).toUpperCase()+key.slice(1));
-
-                                // Determine this player's actual team color from the
-                                // real trip roster first, falling back to inheriting
-                                // from a RAW teammate on the same side only in demo mode.
-                                const playerTeam = resolvePlayerTeam(key, tripPlayers) || (side.keys.length
-                                  ? resolvePlayerTeam(side.keys[0], tripPlayers)
-                                  : null);
-                                const playerColor = playerTeam==="red" ? C.red : playerTeam==="blue" ? C.blue : C.gray;
-
-                                // Is this player on the winning side?
-                                const onWinningSide = side.isWinner;
-
-                                // Compute net for guests using GUEST_PLAYERS handicap
-                                const getGuestNet = (gross, h) => {
-                                  if(!guestPlayer) return null;
-                                  const gCH = Math.round(guestPlayer.index*(course2.slope/113)+(course2.rating-course2.par));
-                                  const gPH = Math.round(gCH*((m.format||"").toLowerCase().includes("singles")?1.0:0.90));
-                                  // Min PH across all players on this side (RAW + this guest)
-                                  const sideAllPHs = [
-                                    ...side.keys.map(k=>pByKey[k]?.ph).filter(v=>v!=null),
-                                    gPH,
-                                  ];
-                                  const minPH = Math.min(...sideAllPHs);
-                                  const gMS   = Math.max(0, gPH - minPH);
-                                  return gross - sOnHole(gMS, course2.strokeIndex[h-1]);
-                                };
-
-                                const scores = allHoles.map(h=>{
-                                  const gross = parseInt(hs[h]?.[key]);
-                                  let net = null;
-                                  if(!isNaN(gross) && gross > 0){
-                                    if(builtPlayer)       net = gross - sOnHole(builtPlayer.ms, course2.strokeIndex[h-1]);
-                                    else if(guestPlayer)  net = getGuestNet(gross, h);
-                                    // no handicap → net stays null, show gross only
-                                  }
-                                  return {h, gross, net, par: course2.pars[h-1]};
-                                });
-                                const total    = scores.reduce((s,{gross})=>s+(isNaN(gross)?0:gross),0);
-                                const netTotal = hasHcp && scores.every(({net})=>net!==null)
-                                  ? scores.reduce((s,{net})=>s+(isNaN(net)?0:net),0)
-                                  : null;
-                                if(total===0 && !hasHcp) return null;
-                                return(
-                                  <div key={key} style={{marginBottom:8}}>
-                                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                                      <span style={{
-                                        fontSize:12,
-                                        fontWeight: onWinningSide ? 700 : 500,
-                                        color: playerColor,
-                                        fontFamily:"Arial,sans-serif",
-                                      }}>
-                                        {displayName}
-                                        {onWinningSide && <span style={{marginLeft:4,fontSize:10}}>★</span>}
-                                        {rawPlayer && <span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",fontWeight:400}}> HCP {rawPlayer.index}</span>}
-                                        {isExt && guestPlayer && <span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",fontWeight:400}}> HCP {guestPlayer.index}</span>}
-                                        {isExt && !guestPlayer && <span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",fontWeight:400}}> (guest)</span>}
-                                      </span>
-                                      <span style={{fontSize:12,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
-                                        {total>0?total:"—"}
-                                        {netTotal!==null&&total>0&&<span style={{fontSize:10,color:C.forest,fontWeight:600}}> (net {netTotal})</span>}
-                                      </span>
-                                    </div>
-                                    <div style={{display:"flex",gap:2,flexWrap:"nowrap",overflowX:"auto"}}>
-                                      {scores.map(({h,gross,net,par})=>{
-                                        if(isNaN(gross)||gross===0) return null;
-                                        const bg=gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg;
-                                        const col=gross<par?C.green:gross===par?C.charcoal:gross===par+1?C.amber:C.red;
-                                        return(
-                                          <div key={h} style={{display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0}}>
-                                            <div style={{fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:1}}>{h}</div>
-                                            <div style={{width:22,height:22,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:col,fontFamily:"Arial,sans-serif"}}>{gross}</div>
-                                            {/* Show net for anyone with a handicap; show gross label for those without */}
-                                            {net!==null
-                                              ? <div style={{fontSize:7,color:playerColor,fontFamily:"Arial,sans-serif",marginTop:1}}>n{net}</div>
-                                              : <div style={{fontSize:7,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>g</div>
-                                            }
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })}
-
-                        {/* Hole-by-hole match result */}
-                        {allHoles.length>0&&(
-                          <div>
-                            <div style={{fontSize:10,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif",letterSpacing:.6,textTransform:"uppercase",marginBottom:4}}>Hole Results</div>
-                            <div style={{display:"flex",gap:2,flexWrap:"nowrap",overflowX:"auto"}}>
-                              {allHoles.map(h=>{
-                                // Derive winner for this hole from net scores
-                                const si2=course2.strokeIndex[h-1];
-                                const p1best=Math.min(...(m.p1Keys||[]).map(k=>{const p=pByKey[k];const g=parseInt(hs[h]?.[k]);return(!p||isNaN(g))?Infinity:g-sOnHole(p.ms,si2);}));
-                                const p2best=Math.min(...(m.p2Keys||[]).map(k=>{const p=pByKey[k];const g=parseInt(hs[h]?.[k]);return(!p||isNaN(g))?Infinity:g-sOnHole(p.ms,si2);}));
-                                const res=p1best<p2best?"p1":p2best<p1best?"p2":"tie";
-                                const wt2=res==="p1"?matchWinningTeam({...m,winnerSide:"p1"},tripPlayers):res==="p2"?matchWinningTeam({...m,winnerSide:"p2"},tripPlayers):"tie";
-                                const bg=wt2==="red"?C.redBg:wt2==="blue"?C.blueBg:C.mist;
-                                const col=wt2==="red"?C.red:wt2==="blue"?C.blue:C.gray;
-                                return(
-                                  <div key={h} style={{display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0}}>
-                                    <div style={{fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:1}}>{h}</div>
-                                    <div style={{width:22,height:22,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:col,fontFamily:"Arial,sans-serif"}}>{wt2==="red"?"R":wt2==="blue"?"B":"–"}</div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  <div style={{fontSize:15,fontWeight:700,color:isPast?C.slate:C.charcoal}}>📍 {group.course}</div>
                 </div>
-              );
-            })}
-          </div>
-        ))}
+                {done.length>0&&active.length===0&&(
+                  <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:4}}>
+                    ✓ Round complete
+                  </div>
+                )}
+              </div>
+
+              {/* Active (live/upcoming) matches — always shown */}
+              {active.map(m=>(
+                <MatchCard key={m.id} m={m} tripPlayers={tripPlayers}
+                  expanded={expandedMatch===m.id}
+                  onTap={()=>{
+                    if(m.status==="live") { goMatch(m.id,"live"); return; }
+                    if(m.status==="upcoming") { goMatch(m.id,"live"); return; }
+                    setExpandedMatch(expandedMatch===m.id?null:m.id);
+                  }}
+                  goMatch={goMatch} go={go}/>
+              ))}
+
+              {/* Completed matches — collapsed behind a toggle */}
+              {done.length>0&&(
+                <>
+                  <button onClick={()=>setShowCompleted(prev=>({...prev,[key]:!showDone}))}
+                    style={{width:"100%",background:"none",border:`1px solid ${C.light}`,borderRadius:10,
+                      padding:"9px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",
+                      alignItems:"center",marginTop:active.length>0?6:0}}>
+                    <span style={{fontSize:12,fontWeight:600,color:C.gray,fontFamily:"Arial,sans-serif"}}>
+                      {done.length} completed match{done.length!==1?"es":""}
+                    </span>
+                    <span style={{fontSize:12,color:C.gray}}>{showDone?"▲":"▼"}</span>
+                  </button>
+                  {showDone&&done.map(m=>(
+                    <MatchCard key={m.id} m={m} tripPlayers={tripPlayers}
+                      expanded={expandedMatch===m.id}
+                      onTap={()=>setExpandedMatch(expandedMatch===m.id?null:m.id)}
+                      goMatch={goMatch} go={go}/>
+                  ))}
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
+
+
+// ─── MATCH CARD COMPONENT ────────────────────────────────────────────────────
+// Extracted from MatchesScreen — renders a single match card in the list.
+// Props: m (match), tripPlayers, expanded (bool), onTap, goMatch, go
+function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go}){
+  const p1Team = (m.p1Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "red";
+  const p2Team = (m.p2Keys||[]).map(k=>resolvePlayerTeam(k,tripPlayers)).find(Boolean) || "blue";
+
+  let topSide="p1";
+  if(m.status==="completed"){
+    topSide = m.winnerSide==="halve"?"p1":m.winnerSide==="p1"?"p1":"p2";
+  } else if(m.status==="live" && m.liveScore){
+    const ls=m.liveScore.toLowerCase();
+    if(ls.includes("red")&&ls.includes("up")) topSide=p1Team==="red"?"p1":"p2";
+    else if(ls.includes("blue")&&ls.includes("up")) topSide=p1Team==="blue"?"p1":"p2";
+  }
+
+  const topLabel    = topSide==="p1"?m.p1:m.p2;
+  const bottomLabel = topSide==="p1"?m.p2:m.p1;
+  const topTeam     = topSide==="p1"?p1Team:p2Team;
+  const botTeam     = topSide==="p1"?p2Team:p1Team;
+  const topColor    = topTeam==="red"?C.red:C.blue;
+  const botColor    = botTeam==="red"?C.red:C.blue;
+
+  const isScr = isScrambleFormat(m);
+  const isXB  = isXBallFormat(m);
+  const scrDisplay = isScr ? getScrambleDisplay(m, tripPlayers) : null;
+  const xbDisplay  = isXB  ? getXBallDisplay(m, tripPlayers)   : null;
+
+  const scoreColor = s => {
+    if(!s) return C.charcoal;
+    const sl = s.toLowerCase();
+    if(sl.includes("red")) return C.red;
+    if(sl.includes("blue")) return C.blue;
+    return C.charcoal;
+  };
+
+  return(
+    <div style={{marginBottom:8}}>
+      <div onClick={onTap}
+        style={{background:C.white,borderRadius:14,padding:"13px 15px",
+          border:expanded?`1.5px solid ${C.forest}33`:`1px solid ${C.mist}`,
+          cursor:m.status==="upcoming"?"default":"pointer",
+          display:"flex",justifyContent:"space-between",alignItems:"stretch",gap:10}}>
+
+        {/* Left: players + status */}
+        <div style={{flex:1,minWidth:0}}>
+          {m.status==="completed"&&<div style={{fontSize:9,color:C.green,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",fontFamily:"Arial,sans-serif",marginBottom:3}}>✓ FINAL</div>}
+          {m.status==="live"&&<div style={{fontSize:9,color:C.green,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",fontFamily:"Arial,sans-serif",marginBottom:3}}>● LIVE</div>}
+          {m.status==="upcoming"&&<div style={{fontSize:9,color:C.gray,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",fontFamily:"Arial,sans-serif",marginBottom:3}}>UPCOMING</div>}
+
+          {/* P1 label */}
+          <div style={{fontSize:13,fontWeight:700,color:topColor,fontFamily:"Arial,sans-serif",
+            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {(isScr||isXB) ? (topSide==="p1"?(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1 : (m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2) : topLabel}
+            {m.status==="completed"&&m.winnerSide===topSide&&<span style={{marginLeft:5}}>★</span>}
+          </div>
+          <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",marginTop:1,
+            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            vs {(isScr||isXB) ? (topSide==="p1"?(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2 : (m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1) : bottomLabel}
+          </div>
+
+          {/* Course + format */}
+          {m.course_name&&(
+            <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:4}}>
+              📍 {m.course_name}{m.tee_name?` · ${m.tee_name}`:""}</div>
+          )}
+          <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>{m.format||"Best Ball"}</div>
+        </div>
+
+        {/* Right: score / thru / action */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",justifyContent:"space-between",minWidth:70}}>
+          {isScr&&m.status==="live"&&scrDisplay&&<>
+            <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
+              <span style={{fontSize:13,fontWeight:700,color:scrDisplay.p1Team==="red"?C.red:C.blue}}>{scrDisplay.p1ScoreToPar||"—"}</span>
+              {scrDisplay.h1>0&&<span style={{fontSize:10,color:C.gray}}>thru {scrDisplay.h1}</span>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
+              <span style={{fontSize:12,fontWeight:700,color:scrDisplay.p2Team==="red"?C.red:C.blue}}>{scrDisplay.p2ScoreToPar||"—"}</span>
+              {scrDisplay.h2>0&&<span style={{fontSize:10,color:C.gray}}>thru {scrDisplay.h2}</span>}
+            </div>
+            <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
+          </>}
+          {isXB&&m.status==="live"&&xbDisplay&&<>
+            <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
+              <span style={{fontSize:13,fontWeight:700,color:xbDisplay.p1Team==="red"?C.red:C.blue}}>{xbDisplay.p1Net||"—"}</span>
+              <span style={{fontSize:10,color:C.gray}}>thru {xbDisplay.p1Banked}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
+              <span style={{fontSize:12,fontWeight:700,color:xbDisplay.p2Team==="red"?C.red:C.blue}}>{xbDisplay.p2Net||"—"}</span>
+              <span style={{fontSize:10,color:C.gray}}>thru {xbDisplay.p2Banked}</span>
+            </div>
+            <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
+          </>}
+          {!isScr&&!isXB&&m.status==="live"&&<>
+            <div style={{fontSize:14,fontWeight:700,color:scoreColor(m.liveScore)}}>{m.liveScore}</div>
+            <div style={{fontSize:11,color:C.gray}}>thru {m.thru}</div>
+            <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
+          </>}
+          {m.status==="completed"&&<>
+            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,textAlign:"right"}}>{m.score||"—"}</div>
+            <div style={{fontSize:10,color:C.gray,textAlign:"right",marginTop:2}}>
+              {m.winnerSide==="halve"?"Halved":m.winnerSide==="p1"?`${m.p1} wins`:m.winnerSide==="p2"?`${m.p2} wins`:""}
+            </div>
+          </>}
+          {m.status==="upcoming"&&(
+            <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"6px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Start →</button>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded completed detail */}
+      {expanded&&m.status==="completed"&&(()=>{
+        const realHoleData = (() => {
+          if(!m.hole_data) return null;
+          try { const p=typeof m.hole_data==="string"?JSON.parse(m.hole_data):m.hole_data; if(Array.isArray(p)&&p.length===18) return p; } catch(e){}
+          return null;
+        })();
+        const course2 = {
+          slope: m.slope||COURSES.mammoth.slope, rating: m.rating||COURSES.mammoth.rating,
+          par: m.par||COURSES.mammoth.par,
+          strokeIndex: realHoleData?realHoleData.map(h=>h.strokeIndex):COURSES.mammoth.strokeIndex,
+          pars: realHoleData?realHoleData.map(h=>h.par):COURSES.mammoth.pars,
+          name: m.course_name||COURSES.mammoth.name,
+        };
+        const allMatchKeys=[...(m.p1Keys||[]),...(m.p2Keys||[])];
+        const realInM = tripPlayers?.length
+          ? tripPlayers.filter(tp=>allMatchKeys.includes(tp.name.toLowerCase()))
+              .map(tp=>({key:tp.name.toLowerCase(),name:tp.name,index:tp.hcp_index||0,team:tp.team||"red"}))
+          : RAW.filter(p=>allMatchKeys.includes(p.key));
+        const builtP=buildPlayers(realInM,course2,m.format||"Best Ball");
+        const pByKey=Object.fromEntries(builtP.map(p=>[p.key,p]));
+        const hs=m.holeScores||{};
+        const allHoles=Array.from({length:18},(_,i)=>i+1).filter(h=>hs[h]&&Object.keys(hs[h]).length>0);
+        return(
+          <div style={{background:C.white,borderRadius:"0 0 14px 14px",border:`1px solid ${C.mist}`,
+            borderTop:"none",padding:"10px 14px 14px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif",fontWeight:600}}>
+                {m.format||"Best Ball"}{m.course_name?` · ${m.course_name}`:""}
+              </div>
+              <button onClick={e=>{e.stopPropagation();go("matchedit");}}
+                style={{background:"none",border:"none",color:C.forest,fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
+                Edit ✏️
+              </button>
+            </div>
+
+            {allHoles.length>0&&(
+              <div style={{overflowX:"auto"}}>
+                <div style={{display:"flex",gap:3,marginBottom:4}}>
+                  <div style={{width:55,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Hole</div>
+                  {allHoles.map(h=><div key={h} style={{flex:1,minWidth:18,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>)}
+                </div>
+                {[...(m.p1Keys||[]),...(m.p2Keys||[])].map((key,ki)=>{
+                  const side = ki<(m.p1Keys||[]).length?"p1":"p2";
+                  const teamColor = side==="p1"?topColor:botColor;
+                  const teamCol2  = resolvePlayerTeam(key,tripPlayers)||(side==="p1"?p1Team:p2Team);
+                  const tc = teamCol2==="red"?C.red:C.blue;
+                  const name = resolvePlayerName(key,tripPlayers);
+                  return(
+                    <div key={key} style={{display:"flex",gap:3,marginBottom:3,alignItems:"center"}}>
+                      <div style={{width:55,flexShrink:0,fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</div>
+                      {allHoles.map(h=>{
+                        const gross=parseInt(hs[h]?.[key]);
+                        const par=course2.pars[h-1]||4;
+                        const rel=!isNaN(gross)?gross-par:null;
+                        const bg=rel===null?C.smoke:rel<=-1?C.greenBg:rel===0?C.white:rel===1?C.redBg:"#FDBA74";
+                        const wt2=resolvePlayerTeam(key,tripPlayers)||(side==="p1"?p1Team:p2Team);
+                        return(
+                          <div key={h} style={{flex:1,minWidth:18,height:20,borderRadius:4,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            <span style={{fontSize:9,fontWeight:600,color:rel===null?C.light:C.charcoal,fontFamily:"Arial,sans-serif"}}>{!isNaN(gross)?gross:"·"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 
 // ─── MATCH EDIT SCREEN ────────────────────────────────────────────────────────
 function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers}){
@@ -5425,6 +5329,11 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
   const [format,         setFormat]        = useState(isEdit ? (editMatch.format||"Best Ball") : "Best Ball");
   const [hcpMode,        setHcpMode]       = useState(isEdit ? (editMatch.hcp_mode||"whs") : "whs");
   const [hcpPct,         setHcpPct]        = useState(isEdit ? (editMatch.hcp_pct||90) : 90);
+  const [matchDate,      setMatchDate]     = useState(()=>{
+    if(isEdit && editMatch.match_date) return editMatch.match_date;
+    // Default to today in YYYY-MM-DD format
+    return new Date().toISOString().split("T")[0];
+  });
   const [selectedCourse, setSelectedCourse]= useState(null);
   const [selectedTee,    setSelectedTee]   = useState(null);
   const [saving,         setSaving]        = useState(false);
@@ -5463,6 +5372,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
         status:        isEdit ? (editMatch.status||"upcoming") : "upcoming",
         winner_side:   isEdit ? editMatch.winnerSide : null,
         thru:          isEdit ? (editMatch.thru||0) : 0,
+        match_date:    matchDate || new Date().toISOString().split("T")[0],
         // Only update course/tee if user actually selected one — preserve existing on edit
         course_name:   selectedCourse?.name || (isEdit ? editMatch.course_name : null),
         tee_name:      selectedTee?.name    || (isEdit ? editMatch.tee_name    : null),
@@ -5492,6 +5402,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           rating:        matchData.rating,
           par:           matchData.par,
           hole_data:     matchData.hole_data,
+          match_date:    matchData.match_date,
         });
         onMatchCreated && onMatchCreated({
           ...editMatch,
@@ -5508,6 +5419,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           rating:      matchData.rating,
           par:         matchData.par,
           hole_data:   matchData.hole_data,
+          match_date:  matchData.match_date,
         });
       } else {
         // Create new match
@@ -5520,6 +5432,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           round:1, day:"Trip Day", holeScores:{}, format,
           status:"upcoming", winnerSide:null, thru:0,
           hole_data: matchData.hole_data,
+          match_date: matchData.match_date,
         });
       }
       go("trip");
@@ -5575,6 +5488,34 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
             </div>
           </div>
         )}
+
+        {/* Date picker — sets which round/day this match belongs to */}
+        <div style={card()}>
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Date</div>
+          <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>
+            Which day is this match being played? Used to group matches by round on the Matches tab.
+          </div>
+          <input type="date" value={matchDate} onChange={e=>setMatchDate(e.target.value)}
+            style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.forest}`,borderRadius:12,
+              fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",
+              color:C.charcoal,background:C.white,boxSizing:"border-box"}}/>
+          {/* Quick-select buttons for common relative dates */}
+          <div style={{display:"flex",gap:6,marginTop:8}}>
+            {[["Today",0],["Tomorrow",1],["In 2 days",2]].map(([label,offset])=>{
+              const d = new Date(); d.setDate(d.getDate()+offset);
+              const val = d.toISOString().split("T")[0];
+              const active = matchDate===val;
+              return(
+                <button key={label} onClick={()=>setMatchDate(val)}
+                  style={{flex:1,background:active?C.forest:C.smoke,color:active?C.white:C.gray,
+                    border:`1.5px solid ${active?C.forest:C.light}`,borderRadius:8,padding:"6px 0",
+                    fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Format picker */}
         <div style={card()}>
@@ -6176,6 +6117,7 @@ export default function App(){
           hcp_mode:    m.hcp_mode    || "whs",
           hcp_pct:     m.hcp_pct     || 90,
           course_name: m.course_name || null,
+          match_date:  m.match_date  || null,
           tee_name:    m.tee_name    || null,
           slope:       m.slope       || null,
           rating:      m.rating      || null,
