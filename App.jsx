@@ -6221,7 +6221,6 @@ export default function App(){
   const [editMatch,       setEditMatch]      = useState(null);
   const [tripCourses,     setTripCourses]    = useState([]);
   const [sideGames,       setSideGames]      = useState([]);
-  const [showQuickAdd,    setShowQuickAdd]   = useState(false);
   const [editSideGame,    setEditSideGame]   = useState(null);
   const [lifetimeStats,   setLifetimeStats]  = useState(null); // null = not loaded yet, {} = loaded but no data
 
@@ -6712,45 +6711,6 @@ export default function App(){
               onGameDeleted={id=>{setSideGames(prev=>prev.filter(sg=>sg.id!==id));setEditSideGame(null);}}/>}
           </>)}
         </div>
-        {showNav&&!tripLoading&&appReady&&!["creatematch","coursesetup","setup","sidegamesetup","live"].includes(screen)&&(
-          <button onClick={()=>setShowQuickAdd(true)}
-            style={{position:"absolute",right:16,bottom:88,width:56,height:56,borderRadius:"50%",
-              background:`linear-gradient(135deg,${C.forest},${C.fairway})`,border:"none",
-              boxShadow:"0 4px 16px rgba(27,67,50,.35)",color:C.white,fontSize:26,fontWeight:300,
-              cursor:"pointer",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            +
-          </button>
-        )}
-        {showQuickAdd && (
-          <div onClick={()=>setShowQuickAdd(false)}
-            style={{position:"absolute",inset:0,background:"rgba(0,0,0,.4)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-            <div onClick={e=>e.stopPropagation()}
-              style={{background:C.white,borderRadius:"20px 20px 0 0",padding:"20px 16px 32px",width:"100%",maxWidth:480,display:"flex",flexDirection:"column",gap:10}}>
-              <div style={{width:36,height:4,background:C.light,borderRadius:2,margin:"0 auto 8px"}}/>
-              <div style={{fontSize:16,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif",marginBottom:4}}>What do you want to add?</div>
-              <button onClick={()=>{setShowQuickAdd(false);setEditMatch(null);setScreen("creatematch");}}
-                style={{display:"flex",alignItems:"center",gap:12,background:C.smoke,border:"none",borderRadius:14,padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
-                <span style={{fontSize:24}}>🏌️</span>
-                <div>
-                  <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>New Match</div>
-                  <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Set up a round — players, format, course</div>
-                </div>
-              </button>
-              <button onClick={()=>{setShowQuickAdd(false);setEditSideGame(null);setScreen("sidegamesetup");}}
-                style={{display:"flex",alignItems:"center",gap:12,background:C.smoke,border:"none",borderRadius:14,padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
-                <span style={{fontSize:24}}>💵</span>
-                <div>
-                  <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>New Side Game</div>
-                  <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif"}}>Nassau or Skins for any match</div>
-                </div>
-              </button>
-              <button onClick={()=>setShowQuickAdd(false)}
-                style={{background:"none",border:"none",color:C.gray,fontSize:13,fontFamily:"Arial,sans-serif",padding:"8px",cursor:"pointer"}}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
         {showNav&&!tripLoading&&appReady&&<BottomNav screen={screen} set={navigateTab} liveCount={matches.filter(m=>m.status==="live").length}/>}
       </div>
     </div>
