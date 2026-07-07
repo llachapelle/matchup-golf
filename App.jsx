@@ -6712,7 +6712,6 @@ export default function App(){
         join_code:    code,
         organizer_id: session.user.id,
         status:       "active",
-        location:     null,
         start_date:   new Date().toISOString().split("T")[0],
         end_date:     new Date().toISOString().split("T")[0],
         team1_name:   "Red",
