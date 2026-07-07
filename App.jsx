@@ -4846,6 +4846,11 @@ function ProfileScreen({go, goBack, matches, playerRecords, onSignOut, session, 
 function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch, userInitials}){
   const [section,   setSection]  = useState("Matches");
   const [collapsedRounds, setCollapsedRounds] = useState({});
+  const [editingPlayer, setEditingPlayer] = useState(null); // player being edited
+  const [editName,  setEditName]  = useState("");
+  const [editHcp,   setEditHcp]   = useState("");
+  const [editTeam,  setEditTeam]  = useState("red");
+  const [savingEdit,setSavingEdit]= useState(false);
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [newName,   setNewName]  = useState("");
   const [newHcp,    setNewHcp]   = useState("");
@@ -4857,6 +4862,30 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
   const goCreateMatch = (matchToEdit) => {
     onGoMatch && onGoMatch(matchToEdit || null);
     go("creatematch");
+  };
+
+  const openEditPlayer = (p) => {
+    setEditingPlayer(p);
+    setEditName(p.name);
+    setEditHcp(p.hcp_index!=null ? String(p.hcp_index) : "");
+    setEditTeam(p.team||"red");
+  };
+
+  const savePlayerEdit = async () => {
+    if(!editingPlayer?.id){ setEditingPlayer(null); return; }
+    setSavingEdit(true);
+    try {
+      await db.patch("trip_players", `id=eq.${editingPlayer.id}`, {
+        name:      editName.trim() || editingPlayer.name,
+        hcp_index: editHcp.trim()==="" ? null : parseFloat(editHcp),
+        team:      editTeam,
+      });
+      editingPlayer.name      = editName.trim() || editingPlayer.name;
+      editingPlayer.hcp_index = editHcp.trim()==="" ? null : parseFloat(editHcp);
+      editingPlayer.team      = editTeam;
+    } catch(e){ console.warn("Failed to save player:", e.message); }
+    setSavingEdit(false);
+    setEditingPlayer(null);
   };
 
   // Use real tripPlayers if available, fall back to RAW demo data
@@ -4934,7 +4963,9 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
               const key = p.name.toLowerCase();
               const pts  = playerRecords[key]?.pts||0;
               const rec  = playerRecords[key]?.record||"0–0–0";
-              return(<div key={p.id||i} style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderBottom:i<arr.length-1?`1px solid ${C.mist}`:"none"}}>
+              return(<div key={p.id||i} onClick={()=>openEditPlayer(p)}
+                style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12,
+                  borderBottom:i<arr.length-1?`1px solid ${C.mist}`:"none",cursor:"pointer"}}>
                 <div style={{width:36,height:36,borderRadius:"50%",background:C.redBg,border:`1.5px solid ${C.red}33`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                   <span style={{fontSize:12,fontWeight:700,color:C.red,fontFamily:"Arial,sans-serif"}}>{calcInitials(p.name)}</span>
                 </div>
@@ -4944,8 +4975,9 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                     {p.hcp_index!=null?`HCP ${p.hcp_index}`:"No HCP"} · {rec}
                   </div>
                 </div>
-                <div style={{textAlign:"right"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.red,fontFamily:"Arial,sans-serif"}}>{fmtPts(pts)}</div>
+                  <span style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Edit</span>
                 </div>
               </div>);
             })}
@@ -4962,7 +4994,9 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
               const key = p.name.toLowerCase();
               const pts  = playerRecords[key]?.pts||0;
               const rec  = playerRecords[key]?.record||"0–0–0";
-              return(<div key={p.id||i} style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderBottom:i<arr.length-1?`1px solid ${C.mist}`:"none"}}>
+              return(<div key={p.id||i} onClick={()=>openEditPlayer(p)}
+                style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12,
+                  borderBottom:i<arr.length-1?`1px solid ${C.mist}`:"none",cursor:"pointer"}}>
                 <div style={{width:36,height:36,borderRadius:"50%",background:C.blueBg,border:`1.5px solid ${C.blue}33`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                   <span style={{fontSize:12,fontWeight:700,color:C.blue,fontFamily:"Arial,sans-serif"}}>{calcInitials(p.name)}</span>
                 </div>
@@ -4972,8 +5006,9 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                     {p.hcp_index!=null?`HCP ${p.hcp_index}`:"No HCP"} · {rec}
                   </div>
                 </div>
-                <div style={{textAlign:"right"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.blue,fontFamily:"Arial,sans-serif"}}>{fmtPts(pts)}</div>
+                  <span style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Edit</span>
                 </div>
               </div>);
             })}
@@ -5011,6 +5046,62 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                 </div>
               </div>
           }
+
+          {/* Edit player bottom sheet */}
+          {editingPlayer&&(
+            <div onClick={()=>setEditingPlayer(null)}
+              style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:200,display:"flex",alignItems:"flex-end"}}>
+              <div onClick={e=>e.stopPropagation()}
+                style={{background:C.white,borderRadius:"20px 20px 0 0",padding:"20px 20px 36px",
+                  width:"100%",display:"flex",flexDirection:"column",gap:14}}>
+                <div style={{width:36,height:4,background:C.light,borderRadius:2,margin:"0 auto 4px"}}/>
+                <div style={{fontSize:16,fontWeight:700,color:C.charcoal}}>Edit Player</div>
+
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Name</div>
+                  <input value={editName} onChange={e=>setEditName(e.target.value)}
+                    style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.light}`,borderRadius:12,
+                      fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
+                </div>
+
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Handicap Index</div>
+                  <input type="number" step="0.1" min="0" max="54" value={editHcp}
+                    onChange={e=>setEditHcp(e.target.value)} placeholder="e.g. 8.4"
+                    style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.light}`,borderRadius:12,
+                      fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
+                </div>
+
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Team</div>
+                  <div style={{display:"flex",gap:10}}>
+                    {[["red","Team Red"],["blue","Team Blue"]].map(([t,label])=>(
+                      <button key={t} onClick={()=>setEditTeam(t)}
+                        style={{flex:1,padding:"11px",borderRadius:12,
+                          border:`2px solid ${editTeam===t?(t==="red"?C.red:C.blue):C.light}`,
+                          background:editTeam===t?(t==="red"?C.redBg:C.blueBg):C.white,
+                          color:editTeam===t?(t==="red"?C.red:C.blue):C.gray,
+                          fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button onClick={savePlayerEdit} disabled={savingEdit}
+                  style={{width:"100%",background:`linear-gradient(135deg,${C.forest},${C.fairway})`,
+                    border:"none",color:C.white,borderRadius:14,padding:14,
+                    fontSize:14,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
+                  {savingEdit?"Saving…":"Save Changes"}
+                </button>
+                <button onClick={()=>setEditingPlayer(null)}
+                  style={{background:"none",border:"none",color:C.gray,fontSize:13,
+                    fontFamily:"Arial,sans-serif",padding:"4px",cursor:"pointer"}}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </>)}
 
         {/* ── MATCHES TAB ── */}
