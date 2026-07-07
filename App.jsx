@@ -298,13 +298,20 @@ function matchWinningTeam(m, tripPlayers) {
 function deriveTeamScores(matches, tripPlayers) {
   let red=0, blue=0, redW=0, blueW=0, halves=0;
   matches.filter(m=>m.status==="completed").forEach(m=>{
+    // Handle manual point adjustments
+    if(m.id==="__adj__"){
+      red  += m.adjRed  || 0;
+      blue += m.adjBlue || 0;
+      return;
+    }
     const wt = matchWinningTeam(m, tripPlayers);
     if(wt==="red")  { red+=1;   redW++; }
     if(wt==="blue") { blue+=1;  blueW++; }
     if(wt==="halve"){ red+=0.5; blue+=0.5; halves++; }
   });
-  const played    = matches.filter(m=>m.status==="completed").length;
-  const total     = matches.length;
+  const realMatches = matches.filter(m=>m.status==="completed" && m.id!=="__adj__");
+  const played    = realMatches.length;
+  const total     = matches.filter(m=>m.id!=="__adj__").length;
   const remaining = total - played;
   return {red, blue, redW, blueW, halves, played, total, remaining};
 }
@@ -832,7 +839,9 @@ function LoginScreen({onAuth, defaultMode="join"}){
     try {
       const trips = await db.get("trips", `join_code=eq.${joinCode}&select=*`);
       if(!trips.length){ setError("Trip code not found. Check with your organizer."); setLoading(false); return; }
-      setFoundTrip(trips[0]);
+      // Also fetch the roster so the user can tap their name to claim their spot
+      const players = await db.get("trip_players", `trip_id=eq.${trips[0].id}&select=*`);
+      setFoundTrip({...trips[0], players});
       setJoinStep("account");
     } catch(e){ setError("Connection error. Try again."); }
     setLoading(false);
@@ -842,16 +851,22 @@ function LoginScreen({onAuth, defaultMode="join"}){
   // so future sign-ins automatically restore this person's real trip data.
   const linkPlayerToUser = async (tripId, userId, playerName) => {
     try {
+      // Try to find an unlinked player row with this exact name first
       const existing = await db.get("trip_players",
-        `trip_id=eq.${tripId}&name=eq.${encodeURIComponent(playerName)}&select=*`);
-      if(existing.length > 0){
-        // Player already exists on roster (added by organizer beforehand) — just link the account
-        await db.patch("trip_players", `id=eq.${existing[0].id}`, { user_id: userId });
+        `trip_id=eq.${tripId}&select=*`);
+      // Match by name (case-insensitive) prioritizing unlinked rows
+      const match = existing.find(p=>
+        p.name.toLowerCase()===playerName.toLowerCase() && !p.user_id
+      ) || existing.find(p=>
+        p.name.toLowerCase()===playerName.toLowerCase()
+      );
+      if(match){
+        await db.patch("trip_players", `id=eq.${match.id}`, { user_id: userId });
       } else {
-        // New player joining fresh — create their roster row linked to this account
-        await db.post("trip_players", [{
+        // No existing row — create a new one
+        await db.post("trip_players", {
           trip_id: tripId, user_id: userId, name: playerName, team: "red", is_guest: false,
-        }]);
+        });
       }
     } catch(e){ console.warn("Failed to link player to user:", e.message); }
   };
@@ -997,6 +1012,31 @@ function LoginScreen({onAuth, defaultMode="join"}){
             <span style={{fontSize:16}}>✓</span>
             <span style={{fontSize:13,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:600}}>Found "{foundTrip?.name}"</span>
           </div>
+
+          {/* Show existing roster so user can claim their spot */}
+          {foundTrip?.players?.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:8}}>
+                Are you already on the roster? Tap your name:
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {foundTrip.players.filter(p=>!p.user_id).map(p=>(
+                  <button key={p.id} onClick={()=>setName(p.name)}
+                    style={{background:name===p.name?C.forest:C.smoke,
+                      color:name===p.name?C.white:C.charcoal,
+                      border:`1.5px solid ${name===p.name?C.forest:C.light}`,
+                      borderRadius:20,padding:"6px 14px",fontSize:13,fontFamily:"Arial,sans-serif",
+                      fontWeight:600,cursor:"pointer"}}>
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:8}}>
+                Not on the list? Type your name below and we'll add you.
+              </div>
+            </div>
+          )}
+
           <div style={{fontSize:18,fontWeight:700,color:C.charcoal,marginBottom:4}}>Sign in or create an account</div>
           <div style={{fontSize:12,fontFamily:"Arial,sans-serif",color:C.gray,marginBottom:14}}>Already have an account? Just enter your existing email and password. New here? Fill in your name and we'll create one for you.</div>
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name (as on the trip roster)"
@@ -1065,14 +1105,22 @@ const calcInitials = (name) => {
   return parts[0].slice(0,2).toUpperCase();
 };
 
+// First name only for use in trip context (match cards, scoring, leaderboard)
+const firstName = (name) => {
+  if(!name) return "";
+  return name.trim().split(/\s+/)[0];
+};
+
 const resolvePlayerName = (key, tripPlayers) => {
   const tp = tripPlayers?.find(p => p.name.toLowerCase() === key);
   if(tp) return tp.name;
   const raw = RAW.find(p => p.key === key);
   if(raw) return raw.name;
-  // Last resort: title-case the key so it at least isn't all-lowercase
   return key.replace(/\b\w/g, c => c.toUpperCase());
 };
+
+// First name only — used in match cards, scoring, leaderboard
+const resolveFirstName = (key, tripPlayers) => firstName(resolvePlayerName(key, tripPlayers));
 
 const isScrambleFormat = m => (m.format||"").toLowerCase().includes("scramble");
 const isXBallFormat = m => {
@@ -1601,12 +1649,12 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
           {/* P1 label */}
           <div style={{fontSize:13,fontWeight:700,color:topColor,fontFamily:"Arial,sans-serif",
             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {(isScr||isXB) ? (topSide==="p1"?(m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1 : (m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2) : topLabel}
+            {(isScr||isXB) ? (topSide==="p1"?(m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p1) : (m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p2)) : firstName(topLabel)}
             {m.status==="completed"&&m.winnerSide===topSide&&<span style={{marginLeft:5}}>★</span>}
           </div>
           <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",marginTop:1,
             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            vs {(isScr||isXB) ? (topSide==="p1"?(m.p2Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p2 : (m.p1Keys||[]).map(k=>resolvePlayerName(k,tripPlayers)).join(", ")||m.p1) : bottomLabel}
+            vs {(isScr||isXB) ? (topSide==="p1"?(m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p2) : (m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p1)) : firstName(bottomLabel)}
           </div>
 
           {/* Date shown on card only when no separate round header is displayed */}
@@ -4904,10 +4952,10 @@ function TripNameEditor({activeTrip}){
   );
 }
 
-function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch, userInitials}){
+function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch, userInitials, onUpdatePlayer, onDeletePlayer, onDeleteTrip, onAdjustPoints}){
   const [section,   setSection]  = useState("Matches");
   const [collapsedRounds, setCollapsedRounds] = useState({});
-  const [editingPlayer, setEditingPlayer] = useState(null); // player being edited
+  const [editingPlayer, setEditingPlayer] = useState(null);
   const [editName,  setEditName]  = useState("");
   const [editHcp,   setEditHcp]   = useState("");
   const [editTeam,  setEditTeam]  = useState("red");
@@ -4918,6 +4966,9 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
   const [newTeam,   setNewTeam]  = useState("red");
   const [saving,    setSaving]   = useState(false);
   const [saveMsg,   setSaveMsg]  = useState("");
+  const [confirmDeleteTrip, setConfirmDeleteTrip] = useState(false);
+  const [deletingTrip, setDeletingTrip] = useState(false);
+  const [showAdjust, setShowAdjust] = useState(false);
 
   // Navigate to create/edit match, optionally passing a match to edit
   const goCreateMatch = (matchToEdit) => {
@@ -4936,16 +4987,25 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
     if(!editingPlayer?.id){ setEditingPlayer(null); return; }
     setSavingEdit(true);
     try {
-      await db.patch("trip_players", `id=eq.${editingPlayer.id}`, {
+      const updates = {
         name:      editName.trim() || editingPlayer.name,
         hcp_index: editHcp.trim()==="" ? null : parseFloat(editHcp),
         team:      editTeam,
-      });
-      editingPlayer.name      = editName.trim() || editingPlayer.name;
-      editingPlayer.hcp_index = editHcp.trim()==="" ? null : parseFloat(editHcp);
-      editingPlayer.team      = editTeam;
+      };
+      await db.patch("trip_players", `id=eq.${editingPlayer.id}`, updates);
+      onUpdatePlayer?.({...editingPlayer, ...updates});
     } catch(e){ console.warn("Failed to save player:", e.message); }
     setSavingEdit(false);
+    setEditingPlayer(null);
+  };
+
+  const deletePlayer = async () => {
+    if(!editingPlayer?.id) return;
+    if(!window.confirm(`Remove ${editingPlayer.name} from the trip?`)) return;
+    try {
+      await db.delete("trip_players", `id=eq.${editingPlayer.id}`);
+      onDeletePlayer?.(editingPlayer.id);
+    } catch(e){ console.warn("Failed to delete player:", e.message); }
     setEditingPlayer(null);
   };
 
@@ -5155,6 +5215,11 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                     fontSize:14,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
                   {savingEdit?"Saving…":"Save Changes"}
                 </button>
+                <button onClick={deletePlayer}
+                  style={{background:"none",border:`1px solid ${C.red}`,color:C.red,borderRadius:14,
+                    padding:"11px",fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",width:"100%"}}>
+                  Remove from Trip
+                </button>
                 <button onClick={()=>setEditingPlayer(null)}
                   style={{background:"none",border:"none",color:C.gray,fontSize:13,
                     fontFamily:"Arial,sans-serif",padding:"4px",cursor:"pointer"}}>
@@ -5333,6 +5398,64 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
               style={{...pill(C.mist,C.forest),fontSize:11,cursor:"pointer",fontWeight:700,letterSpacing:1}}>
               {tripCode}
             </div>
+          </div>
+
+          {/* Manual Point Adjustment */}
+          <div style={card()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showAdjust?12:0}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>Manual Points</div>
+                <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>Add points for formats not tracked by the app</div>
+              </div>
+              <button onClick={()=>setShowAdjust(!showAdjust)}
+                style={{background:C.smoke,border:`1.5px solid ${C.light}`,color:C.forest,borderRadius:8,
+                  padding:"5px 12px",fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
+                {showAdjust?"Done":"Adjust"}
+              </button>
+            </div>
+            {showAdjust&&(
+              <div style={{display:"flex",gap:10}}>
+                {[["red","Red +1",C.red,C.redBg],["blue","Blue +1",C.blue,C.blueBg]].map(([team,label,color,bg])=>(
+                  <button key={team} onClick={()=>{ onAdjustPoints?.(team,1); setSaveMsg(`+1 pt to ${team} team`); setTimeout(()=>setSaveMsg(""),2000); }}
+                    style={{flex:1,background:bg,border:`2px solid ${color}`,color,borderRadius:10,
+                      padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Delete Trip — danger zone */}
+          <div style={{marginTop:8}}>
+            {!confirmDeleteTrip ? (
+              <button onClick={()=>setConfirmDeleteTrip(true)}
+                style={{width:"100%",background:"none",border:`1.5px solid ${C.red}`,color:C.red,
+                  borderRadius:12,padding:"12px",fontSize:13,fontFamily:"Arial,sans-serif",
+                  fontWeight:600,cursor:"pointer"}}>
+                Delete Trip
+              </button>
+            ) : (
+              <div style={card({background:C.redBg,border:`1.5px solid ${C.red}`})}>
+                <div style={{fontSize:13,fontWeight:700,color:C.red,marginBottom:6}}>Are you sure?</div>
+                <div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:12}}>
+                  This permanently deletes all matches, scores, and players. Cannot be undone.
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={async()=>{setDeletingTrip(true);await onDeleteTrip?.();setDeletingTrip(false);}}
+                    disabled={deletingTrip}
+                    style={{flex:1,background:C.red,border:"none",color:C.white,borderRadius:10,
+                      padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+                    {deletingTrip?"Deleting…":"Yes, Delete"}
+                  </button>
+                  <button onClick={()=>setConfirmDeleteTrip(false)}
+                    style={{flex:1,background:C.white,border:`1px solid ${C.light}`,color:C.gray,
+                      borderRadius:10,padding:"11px",fontSize:13,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>)}
 
@@ -6857,6 +6980,48 @@ export default function App(){
     setScreen("creatematch");
   }, [loadTrip]);
 
+  const handleDeleteTrip = useCallback(async () => {
+    if(!activeTrip?.id) return;
+    try {
+      const mids = (await db.get("matches",`trip_id=eq.${activeTrip.id}&select=id`)).map(m=>m.id);
+      if(mids.length) await db.delete("hole_scores",`match_id=in.(${mids.join(",")})`);
+      await db.delete("matches",    `trip_id=eq.${activeTrip.id}`);
+      await db.delete("side_games", `trip_id=eq.${activeTrip.id}`);
+      await db.delete("trip_players",`trip_id=eq.${activeTrip.id}`);
+      const cids = (await db.get("courses",`trip_id=eq.${activeTrip.id}&select=id`)).map(c=>c.id);
+      if(cids.length) await db.delete("tee_boxes",`course_id=in.(${cids.join(",")})`);
+      await db.delete("courses",`trip_id=eq.${activeTrip.id}`);
+      await db.delete("trips",  `id=eq.${activeTrip.id}`);
+      setActiveTrip(null);
+      setTripPlayers([]);
+      setMatches([]);
+      setScreen("intent");
+    } catch(e){ alert("Failed to delete trip: " + e.message); }
+  }, [activeTrip]);
+
+  const handleAdjustPoints = useCallback((team, delta) => {
+    // Store manual point adjustments as a special synthetic match
+    // that deriveTeamScores picks up alongside real matches.
+    setMatches(prev => {
+      const existing = prev.find(m=>m.id==="__adj__");
+      if(existing){
+        return prev.map(m=>m.id==="__adj__" ? {
+          ...m,
+          adjRed:  (m.adjRed||0)  + (team==="red"  ? delta : 0),
+          adjBlue: (m.adjBlue||0) + (team==="blue" ? delta : 0),
+        } : m);
+      }
+      return [...prev, {
+        id:"__adj__", status:"completed", format:"Manual Adjustment",
+        p1:"Red", p2:"Blue", p1Keys:[], p2Keys:[],
+        winnerSide: team==="red" ? "p1" : "p2",
+        score:`+${delta} pts`,
+        adjRed:  team==="red"  ? delta : 0,
+        adjBlue: team==="blue" ? delta : 0,
+      }];
+    });
+  }, []);
+
   // Quick Match: silently creates a minimal shadow trip so all match/scoring
   // logic works unchanged, then drops the user straight into match creation.
   // The trip is named "Quick Match · [date]" and is invisible to the user —
@@ -6916,7 +7081,7 @@ export default function App(){
               {...matchProps}/>}
             {screen==="board"       &&<LeaderboardScreen  go={setScreen} tripPlayers={tripPlayers} activeTrip={activeTrip} {...matchProps}/>}
             {screen==="sidegames"   &&<SideGamesScreen    go={setScreen} goBack={goBack}/>}
-            {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} {...matchProps}/>}
+            {screen==="trip"        &&<TripScreen         go={setScreen} activeTrip={activeTrip} tripPlayers={tripPlayers} onGoMatch={m=>{setEditMatch(m||null);}} onUpdatePlayer={p=>setTripPlayers(prev=>prev.map(x=>x.id===p.id?{...x,...p}:x))} onDeletePlayer={id=>setTripPlayers(prev=>prev.filter(p=>p.id!==id))} onDeleteTrip={handleDeleteTrip} onAdjustPoints={handleAdjustPoints} {...matchProps}/>}
             {screen==="creatematch" &&<CreateMatchScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} tripPlayers={tripPlayers} editMatch={editMatch} tripCourses={tripCourses} onMatchCreated={handleMatchCreated} onCourseAdded={c=>setTripCourses(prev=>[...prev,c])}/>}
             {screen==="coursesetup" &&<CourseSetupScreen  go={setScreen} goBack={goBack} activeTrip={activeTrip} onCourseAdded={c=>{setTripCourses(prev=>[...prev,c]);setScreen("creatematch");}}/>}
             {screen==="join"        &&<LoginScreen        onAuth={handleAuth} defaultMode="join"/>}
