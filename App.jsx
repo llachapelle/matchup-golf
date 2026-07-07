@@ -5050,7 +5050,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
     setSaving(false);
   };
 
-  const tripCode = activeTrip?.join_code?.toUpperCase() || "SV2026";
+  const tripCode = activeTrip?.join_code?.toUpperCase() || "";
   const tripName = activeTrip?.name || "My Golf Trip";
 
   return(
@@ -5391,7 +5391,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                 <div>
                   <div style={{fontSize:14,fontWeight:700,color:C.charcoal}}>{activeTrip.name}</div>
                   <div style={{fontSize:12,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:2}}>
-                    {displayPlayers.length} players · Code: {tripCode}
+                    {displayPlayers.length} player{displayPlayers.length!==1?"s":""}
                   </div>
                 </div>
                 <span style={{...pill(C.greenBg,C.green),fontSize:10}}>Active</span>
