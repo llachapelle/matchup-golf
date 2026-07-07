@@ -17,7 +17,7 @@ const db = {
     const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${query}`, { headers:{...this.headers,"Accept":"application/json"} });
     if(!r.ok) throw new Error(await r.text());
     return r.json();
-  }, 
+  },
 
   async post(table, body){
     const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
@@ -5065,9 +5065,12 @@ function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
     setSearching(true); setSearchErr(""); setResults(null);
     try {
       const res = await fetch(`/api/courses?q=${encodeURIComponent(searchQ.trim())}`);
-      const data = await res.json();
+      // Read as text first so we can show the raw response if JSON parse fails
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); }
+      catch(e){ throw new Error(`Non-JSON response (${res.status}): ${text.slice(0,200)}`); }
       if(data.error) throw new Error(data.raw ? `${data.error} — ${data.raw}` : data.error);
-      // API returns { courses: [...] }
       const courses = data.courses || [];
       setResults(courses);
       if(courses.length === 0) setSearchErr("No courses found — try a different name or enter manually below.");
