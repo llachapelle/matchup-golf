@@ -1172,7 +1172,7 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
   const live = matches.filter(m=>m.status==="live");
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
-      <Header sub="⛳ MatchUp Golf" title={activeTrip?.name||"Sand Valley Ryder Cup"} detail={activeTrip?`Trip Code: ${activeTrip.join_code?.toUpperCase()}`:"June 5–8  ·  Round 2 of 5 In Progress"} onProfile={()=>go("profile")} initials={userInitials}/>
+      <Header sub="⛳ MatchUp Golf" title={activeTrip?.name||"My Golf Trip"} detail={activeTrip?`Trip Code: ${activeTrip.join_code?.toUpperCase()}`:"Set up your trip to get started"} onProfile={()=>go("profile")} initials={userInitials}/>
       <div style={{flex:1,padding:"18px 16px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         <TeamScoreCards ts={ts}/>
         {/* Live matches */}
@@ -4435,7 +4435,7 @@ function PayoutsScreen({go, goBack, matches, ts, playerRecords, tripPlayers, act
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"14px 20px 18px"}}>
         <div style={{marginBottom:8}}><BackBtn goBack={goBack} go={go} to="board"/></div>
-        <div style={{color:"rgba(255,255,255,.6)",fontSize:11,fontFamily:"Arial,sans-serif",letterSpacing:"1.2px",textTransform:"uppercase",marginBottom:3}}>{activeTrip?.name||"Sand Valley Ryder Cup"}</div>
+        <div style={{color:"rgba(255,255,255,.6)",fontSize:11,fontFamily:"Arial,sans-serif",letterSpacing:"1.2px",textTransform:"uppercase",marginBottom:3}}>{activeTrip?.name||"My Golf Trip"}</div>
         <div style={{color:C.white,fontSize:20,fontWeight:700}}>Payouts & Side Games</div>
       </div>
       <div style={{background:C.white,padding:"10px 16px",display:"flex",gap:8,borderBottom:`1px solid ${C.light}`,overflowX:"auto"}}>
@@ -4896,7 +4896,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
   };
 
   const tripCode = activeTrip?.join_code?.toUpperCase() || "SV2026";
-  const tripName = activeTrip?.name || "Sand Valley Ryder Cup";
+  const tripName = activeTrip?.name || "My Golf Trip";
 
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
