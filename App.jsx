@@ -4854,6 +4854,7 @@ function ProfileScreen({go, goBack, matches, playerRecords, onSignOut, session, 
 }
 function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch, userInitials}){
   const [section,   setSection]  = useState("Matches");
+  const [collapsedRounds, setCollapsedRounds] = useState({});
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [newName,   setNewName]  = useState("");
   const [newHcp,    setNewHcp]   = useState("");
@@ -5027,38 +5028,119 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
             style={bigBtn(`linear-gradient(135deg,${C.forest},${C.fairway})`,C.white,{boxShadow:"0 6px 20px rgba(27,67,50,.22)"})}>
             + Create New Match
           </button>
-          {matches.filter(m=>m.status!=="deleted").length===0
-            ? <div style={{textAlign:"center",padding:"40px 20px",color:C.gray,fontFamily:"Arial,sans-serif"}}>
+
+          {(() => {
+            const today = new Date().toISOString().split("T")[0];
+            const active = matches.filter(m=>m.status!=="deleted");
+
+            if(active.length===0) return(
+              <div style={{textAlign:"center",padding:"40px 20px",color:C.gray,fontFamily:"Arial,sans-serif"}}>
                 No matches yet. Create your first match above.
               </div>
-            : matches.filter(m=>m.status!=="deleted").map(m=>{
-                const isLive=m.status==="live", isDone=m.status==="completed";
-                return(<div key={m.id} style={{...card({border:isLive?`1.5px solid ${C.mint}`:isDone?`1px solid ${C.light}`:`1px solid ${C.mist}`})}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div style={{flex:1}}>
-                      {isLive&&<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:3}}><div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/><span style={{fontSize:10,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE</span></div>}
-                      <div style={{fontSize:13,fontWeight:600,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{m.p1}</div>
-                      <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>vs {m.p2}</div>
-                      {/* Format, course, tee details */}
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
-                        {m.format&&<span style={{...pill(C.mist,C.forest),fontSize:10}}>{m.format}</span>}
-                        {m.course_name&&<span style={{...pill(C.mist,C.slate),fontSize:10}}>📍{m.course_name}{m.tee_name?` · ${m.tee_name} Tees`:""}</span>}
-                        {m.hcp_mode&&m.hcp_mode!=="whs"&&<span style={{...pill(C.amberBg,C.amber),fontSize:10}}>{m.hcp_mode==="off"?"No HCP":`HCP ${m.hcp_pct}%`}</span>}
+            );
+
+            // Group by round_name or date, unscheduled at bottom
+            const byKey = {};
+            active.forEach(m=>{
+              const key = m.round_name || m.match_date || "unscheduled";
+              if(!byKey[key]) byKey[key] = {
+                key,
+                label:  m.round_name || null,
+                date:   m.match_date || null,
+                matches: [],
+              };
+              byKey[key].matches.push(m);
+            });
+
+            const groups = Object.values(byKey).sort((a,b)=>{
+              if(a.key==="unscheduled") return 1;
+              if(b.key==="unscheduled") return -1;
+              const ad = a.matches[0]?.match_date||"9999";
+              const bd = b.matches[0]?.match_date||"9999";
+              return ad.localeCompare(bd);
+            });
+
+            const fmtDate = (d) => {
+              if(!d) return null;
+              if(d===today) return "Today";
+              const dt = new Date(d+"T12:00:00");
+              return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+            };
+
+            return groups.map(group=>{
+              const isCollapsed = collapsedRounds[group.key];
+              const dateLabel = fmtDate(group.date);
+              const headerLabel = group.label
+                ? (dateLabel ? `${group.label} · ${dateLabel}` : group.label)
+                : (dateLabel || "Unscheduled");
+              const allDone = group.matches.every(m=>m.status==="completed");
+              const anyLive = group.matches.some(m=>m.status==="live");
+              const courses = [...new Set(group.matches.map(m=>m.course_name).filter(Boolean))];
+              const hasTBD = group.matches.some(m=>!m.p1Keys?.length||!m.p2Keys?.length);
+
+              return(
+                <div key={group.key} style={{marginBottom:4}}>
+                  {/* Round header — tappable to collapse */}
+                  <button onClick={()=>setCollapsedRounds(p=>({...p,[group.key]:!p[group.key]}))}
+                    style={{width:"100%",background:C.white,border:`1px solid ${C.light}`,
+                      borderRadius:isCollapsed?12:"12px 12px 0 0",padding:"11px 14px",
+                      cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",
+                      borderBottom:isCollapsed?undefined:`1px solid ${C.mist}`}}>
+                    <div style={{textAlign:"left"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{headerLabel}</span>
+                        {anyLive&&<div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/>}
+                        {hasTBD&&<span style={{...pill(C.amberBg,C.amber),fontSize:9}}>TBD</span>}
+                        {allDone&&<span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>✓</span>}
                       </div>
+                      {courses.length>0&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>📍 {courses.join(" · ")} · {group.matches.length} match{group.matches.length!==1?"es":""}</div>}
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:8}}>
-                      {isDone&&<div style={{fontSize:13,fontWeight:700,color:C.forest,fontFamily:"Arial,sans-serif"}}>{m.score}</div>}
-                      {isLive&&<div style={{fontSize:13,fontWeight:700,color:scoreColor(m.liveScore),fontFamily:"Arial,sans-serif"}}>{m.liveScore}</div>}
-                      {m.status==="upcoming"&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>⏰</div>}
-                      <button onClick={()=>goCreateMatch(m)}
-                        style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer"}}>
-                        Edit
-                      </button>
+                    <span style={{fontSize:12,color:C.gray,marginLeft:8}}>{isCollapsed?"▼":"▲"}</span>
+                  </button>
+
+                  {/* Match rows — shown when not collapsed */}
+                  {!isCollapsed&&(
+                    <div style={{background:C.white,borderRadius:"0 0 12px 12px",border:`1px solid ${C.light}`,borderTop:"none",overflow:"hidden"}}>
+                      {group.matches.map((m,mi)=>{
+                        const isLive = m.status==="live";
+                        const isDone = m.status==="completed";
+                        const isTBD  = !m.p1Keys?.length||!m.p2Keys?.length;
+                        return(
+                          <div key={m.id} style={{
+                            padding:"10px 14px",
+                            borderBottom:mi<group.matches.length-1?`1px solid ${C.mist}`:"none",
+                            display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,
+                          }}>
+                            <div style={{flex:1,minWidth:0}}>
+                              {isLive&&<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
+                                <div style={{width:5,height:5,borderRadius:"50%",background:C.green}}/>
+                                <span style={{fontSize:9,color:C.green,fontFamily:"Arial,sans-serif",fontWeight:700}}>LIVE</span>
+                              </div>}
+                              <div style={{fontSize:13,fontWeight:600,color:isTBD?C.gray:C.charcoal,fontFamily:"Arial,sans-serif",
+                                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                {isTBD?"TBD vs TBD":`${m.p1} vs ${m.p2}`}
+                              </div>
+                              <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>
+                                {m.format||"Best Ball"}
+                                {isDone&&m.score?<span style={{color:C.forest,fontWeight:700}}> · {m.score}</span>:""}
+                                {isLive&&m.liveScore?<span style={{color:scoreColor(m.liveScore),fontWeight:700}}> · {m.liveScore}</span>:""}
+                              </div>
+                            </div>
+                            <button onClick={()=>goCreateMatch(m)}
+                              style={{background:C.smoke,color:C.forest,border:`1.5px solid ${C.light}`,
+                                borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",
+                                fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                              Edit
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-                </div>);
-              })
-          }
+                  )}
+                </div>
+              );
+            });
+          })()}
         </>)}
 
         {/* ── MY TRIPS TAB ── */}
@@ -5485,11 +5567,11 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
   };
 
   const selectedFormat = MATCH_FORMATS.find(f=>f.name===format) || MATCH_FORMATS[0];
-  const p1Label = p1Players.length ? p1Players.map(p=>p.name).join(" / ") : "Select players…";
-  const p2Label = p2Players.length ? p2Players.map(p=>p.name).join(" / ") : "Select players…";
+  const p1Label = p1Players.length ? p1Players.map(p=>p.name).join(" / ") : "TBD";
+  const p2Label = p2Players.length ? p2Players.map(p=>p.name).join(" / ") : "TBD";
 
   const saveMatch = async () => {
-    if(!p1Players.length || !p2Players.length){ setError("Select at least one player per side"); return; }
+    // Players are optional — matches can be saved as TBD and players assigned later
     setSaving(true); setError("");
     try {
       const matchData = {
@@ -5797,7 +5879,10 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
         {/* Side 1 */}
         <div style={card()}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{fontSize:13,fontWeight:700,color:C.red}}>Side 1</div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.red}}>Side 1</div>
+              <span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>optional — can assign later</span>
+            </div>
             <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{p1Players.length} selected</div>
           </div>
           <div style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,marginBottom:10,minHeight:20}}>{p1Label}</div>
@@ -5821,7 +5906,10 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
         {/* Side 2 */}
         <div style={card()}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{fontSize:13,fontWeight:700,color:C.blue}}>Side 2</div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.blue}}>Side 2</div>
+              <span style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>optional — can assign later</span>
+            </div>
             <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>{p2Players.length} selected</div>
           </div>
           <div style={{fontSize:13,fontFamily:"Arial,sans-serif",color:C.forest,fontWeight:600,marginBottom:10,minHeight:20}}>{p2Label}</div>
