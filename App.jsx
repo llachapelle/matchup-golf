@@ -1257,36 +1257,77 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
             );
           })}
         </div>
-        {/* Schedule strip — real days/courses derived from actual matches,
-            not a fixed 3-day fictional demo schedule */}
+        {/* Schedule strip — grouped by round_name or date, only shown when
+            matches actually have dates set so it doesn't show "Trip Day" garbage */}
         {(() => {
-          const groupKey = m => `${m.day||"Trip Day"}__${m.course_name||"Course TBD"}`;
-          const groups = Array.from(new Set(matches.map(groupKey))).map(key=>{
-            const [day, courseName] = key.split("__");
-            const groupMatches = matches.filter(m=>groupKey(m)===key);
-            const allDone = groupMatches.every(m=>m.status==="completed");
-            const anyLive = groupMatches.some(m=>m.status==="live");
-            return {day, course: courseName, status: allDone?"done":anyLive?"live":"upcoming", count: groupMatches.length};
-          }).slice(0,3);
+          const today = new Date().toISOString().split("T")[0];
+          const fmtDate = (d) => {
+            if(!d) return null;
+            if(d===today) return "Today";
+            const dt = new Date(d+"T12:00:00");
+            const tom = new Date(); tom.setDate(tom.getDate()+1);
+            if(d===tom.toISOString().split("T")[0]) return "Tomorrow";
+            return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+          };
 
-          if(groups.length===0) return null;
+          // Only include matches that have a real date set
+          const dated = matches.filter(m=>m.match_date);
+          if(dated.length===0) return null;
+
+          // Group by round_name if set, otherwise by date
+          const byKey = {};
+          dated.forEach(m=>{
+            const key = m.round_name || m.match_date;
+            if(!byKey[key]) byKey[key] = {
+              label: m.round_name || null,
+              date:  m.match_date,
+              matches: [],
+            };
+            byKey[key].matches.push(m);
+          });
+
+          const groups = Object.values(byKey)
+            .sort((a,b)=>(a.date||"").localeCompare(b.date||""))
+            .slice(0,4)
+            .map(g=>({
+              ...g,
+              allDone: g.matches.every(m=>m.status==="completed"),
+              anyLive: g.matches.some(m=>m.status==="live"),
+              count:   g.matches.length,
+              courses: [...new Set(g.matches.map(m=>m.course_name).filter(Boolean))],
+            }));
 
           return(
             <div style={card()}>
               <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Schedule</div>
-              {groups.map((g,i)=>(
-                <div key={`${g.day}__${g.course}`} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<groups.length-1?`1px solid ${C.mist}`:"none",opacity:g.status==="done"?.5:1}}>
-                  <div>
-                    <div style={{fontSize:12,fontWeight:700,color:g.status==="done"?C.gray:C.charcoal,fontFamily:"Arial,sans-serif"}}>{g.day}</div>
-                    <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>📍 {g.course} · {g.count} match{g.count!==1?"es":""}</div>
+              {groups.map((g,i)=>{
+                const dateLabel = fmtDate(g.date);
+                const isToday = g.date===today;
+                const status = g.allDone?"done":g.anyLive?"live":"upcoming";
+                return(
+                  <div key={`${g.label||g.date}`}
+                    style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"8px 0",borderBottom:i<groups.length-1?`1px solid ${C.mist}`:"none",
+                      opacity:status==="done"?.5:1}}>
+                    <div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        {g.label&&<div style={{fontSize:12,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{g.label}</div>}
+                        {dateLabel&&<div style={{fontSize:g.label?11:12,fontWeight:g.label?400:700,
+                          color:isToday?C.forest:g.label?C.gray:C.charcoal,fontFamily:"Arial,sans-serif"}}>{dateLabel}</div>}
+                      </div>
+                      <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>
+                        {g.courses.length>0?`📍 ${g.courses.join(" · ")} · `:""}
+                        {g.count} match{g.count!==1?"es":""}
+                      </div>
+                    </div>
+                    <div>
+                      {status==="live"    &&<div style={{...pill(C.greenBg,C.green),fontSize:10}}>LIVE</div>}
+                      {status==="done"    &&<div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>Complete</div>}
+                      {status==="upcoming"&&<div style={{fontSize:10,color:isToday?C.forest:C.slate,fontFamily:"Arial,sans-serif",fontWeight:isToday?700:400}}>{isToday?"Today":"Upcoming"}</div>}
+                    </div>
                   </div>
-                  <div style={{textAlign:"right"}}>
-                    {g.status==="live" && <div style={{...pill(C.greenBg,C.green),fontSize:10}}>LIVE</div>}
-                    {g.status==="done" && <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif"}}>Complete</div>}
-                    {g.status==="upcoming" && <div style={{fontSize:10,color:C.forest,fontFamily:"Arial,sans-serif",fontWeight:600}}>Upcoming</div>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
         })()}
