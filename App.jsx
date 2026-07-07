@@ -3909,25 +3909,7 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
         skinsWon:0,
         rounds: [],
       }))
-    : (() => {
-        // Demo fallback: RAW + any GUEST_PLAYERS who actually played
-        const guestTeamColor = (key) => {
-          for(const m of matches){
-            const inP1=(m.p1||"").toLowerCase().includes(key);
-            const inP2=(m.p2||"").toLowerCase().includes(key);
-            if(inP1){ const t=(m.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean); if(t) return t; }
-            if(inP2){ const t=(m.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)?.team).find(Boolean); if(t) return t; }
-          }
-          return "red";
-        };
-        const guestsWhoPlayed = Object.values(GUEST_PLAYERS).filter(g=>
-          playerRecords[g.key] && (playerRecords[g.key].w+playerRecords[g.key].l+playerRecords[g.key].h) > 0
-        );
-        return [
-          ...RAW.map(p=>({...p, isGuest:false, ...(PLAYER_ROUNDS[p.key]||{})})),
-          ...guestsWhoPlayed.map(g=>({...g, team:guestTeamColor(g.key), isGuest:true, money:0, skinsWon:0, rounds:[]})),
-        ];
-      })();
+    : []; // No trip yet — show nothing instead of demo players
 
   const players = allParticipants.map(p=>({
     ...p,
@@ -3969,7 +3951,15 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
             </select>
           </div>
 
-          {visiblePlayers.map((p,i)=>{
+          {players.length === 0 && (
+            <div style={{textAlign:"center",padding:"32px 16px",color:C.gray,fontFamily:"Arial,sans-serif"}}>
+              <div style={{fontSize:24,marginBottom:8}}>📋</div>
+              <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>No players yet</div>
+              <div style={{fontSize:12}}>Add players to your trip to see the leaderboard.</div>
+            </div>
+          )}
+
+          {players.length > 0 && visiblePlayers.map((p,i)=>{
             const hasPlayed_p = p.played > 0;
             const hasPoints_p = p.points > 0;
             const tc = teamColor(p.team);
@@ -4028,6 +4018,7 @@ function LeaderboardScreen({go, ts, playerRecords, matches, tripPlayers, activeT
               {notPlayed.length} player{notPlayed.length!==1?"s":""} haven't played yet
             </div>
           )}
+          
         </div>
 
       </div>
