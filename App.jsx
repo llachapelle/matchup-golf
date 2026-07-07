@@ -5168,7 +5168,11 @@ function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
         yardage:    t.yardage?parseInt(t.yardage):null,
         hole_data:  t.holes?.length>0 ? JSON.stringify(t.holes) : null,
       })));
-      onCourseAdded && onCourseAdded({...course, tee_boxes: validTees.map(t=>({...t,course_id:course.id}))});
+      // Fetch back the saved tee rows so they have real DB-generated IDs.
+      // Without this, the tee objects have no id field and the selection
+      // check (selectedTee?.id===t.id) silently breaks in CreateMatchScreen.
+      const savedTees = await db.get("tee_boxes", `course_id=eq.${course.id}&select=*&order=created_at.asc`);
+      onCourseAdded && onCourseAdded({...course, tee_boxes: savedTees});
       go("creatematch");
     } catch(e){ setError("Failed to save course: "+e.message); }
     setSaving(false);
