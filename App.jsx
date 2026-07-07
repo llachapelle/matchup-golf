@@ -17,7 +17,7 @@ const db = {
     const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${query}`, { headers:{...this.headers,"Accept":"application/json"} });
     if(!r.ok) throw new Error(await r.text());
     return r.json();
-  },
+  }, 
 
   async post(table, body){
     const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
