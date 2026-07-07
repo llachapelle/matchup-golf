@@ -3105,7 +3105,6 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
               Edit
             </button>
             <button onClick={async ()=>{
-              if(!window.confirm("Clear all scores and reset this match to upcoming?")) return;
               // Wipe hole scores from DB
               try { await db.delete("hole_scores",`match_id=eq.${match.id}`); } catch(e){}
               // Reset match row
@@ -4969,6 +4968,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
   const [confirmDeleteTrip, setConfirmDeleteTrip] = useState(false);
   const [deletingTrip, setDeletingTrip] = useState(false);
   const [showAdjust, setShowAdjust] = useState(false);
+  const [confirmDeletePlayer, setConfirmDeletePlayer] = useState(false);
 
   // Navigate to create/edit match, optionally passing a match to edit
   const goCreateMatch = (matchToEdit) => {
@@ -4993,7 +4993,9 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
         team:      editTeam,
       };
       await db.patch("trip_players", `id=eq.${editingPlayer.id}`, updates);
-      onUpdatePlayer?.({...editingPlayer, ...updates});
+      // Reload from DB to ensure fresh data on next render
+      const [fresh] = await db.get("trip_players", `id=eq.${editingPlayer.id}&select=*`);
+      if(fresh) onUpdatePlayer?.(fresh);
     } catch(e){ console.warn("Failed to save player:", e.message); }
     setSavingEdit(false);
     setEditingPlayer(null);
@@ -5001,11 +5003,15 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 
   const deletePlayer = async () => {
     if(!editingPlayer?.id) return;
-    if(!window.confirm(`Remove ${editingPlayer.name} from the trip?`)) return;
+    setConfirmDeletePlayer(true);
+  };
+
+  const confirmDeletePlayerFn = async () => {
     try {
       await db.delete("trip_players", `id=eq.${editingPlayer.id}`);
       onDeletePlayer?.(editingPlayer.id);
     } catch(e){ console.warn("Failed to delete player:", e.message); }
+    setConfirmDeletePlayer(false);
     setEditingPlayer(null);
   };
 
@@ -5087,9 +5093,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
               return(<div key={p.id||i} onClick={()=>openEditPlayer(p)}
                 style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12,
                   borderBottom:i<arr.length-1?`1px solid ${C.mist}`:"none",cursor:"pointer"}}>
-                <div style={{width:36,height:36,borderRadius:"50%",background:C.redBg,border:`1.5px solid ${C.red}33`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                  <span style={{fontSize:12,fontWeight:700,color:C.red,fontFamily:"Arial,sans-serif"}}>{calcInitials(p.name)}</span>
-                </div>
+                <div style={{width:4,height:36,borderRadius:2,background:C.red,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{p.name}</div>
                   <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>
@@ -5098,7 +5102,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.red,fontFamily:"Arial,sans-serif"}}>{fmtPts(pts)}</div>
-                  <span style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Edit</span>
+                  <span style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>›</span>
                 </div>
               </div>);
             })}
@@ -5118,9 +5122,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
               return(<div key={p.id||i} onClick={()=>openEditPlayer(p)}
                 style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12,
                   borderBottom:i<arr.length-1?`1px solid ${C.mist}`:"none",cursor:"pointer"}}>
-                <div style={{width:36,height:36,borderRadius:"50%",background:C.blueBg,border:`1.5px solid ${C.blue}33`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                  <span style={{fontSize:12,fontWeight:700,color:C.blue,fontFamily:"Arial,sans-serif"}}>{calcInitials(p.name)}</span>
-                </div>
+                <div style={{width:4,height:36,borderRadius:2,background:C.blue,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{p.name}</div>
                   <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>
@@ -5129,7 +5131,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.blue,fontFamily:"Arial,sans-serif"}}>{fmtPts(pts)}</div>
-                  <span style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>Edit</span>
+                  <span style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif"}}>›</span>
                 </div>
               </div>);
             })}
@@ -5170,7 +5172,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
 
           {/* Edit player bottom sheet */}
           {editingPlayer&&(
-            <div onClick={()=>setEditingPlayer(null)}
+            <div onClick={()=>{setEditingPlayer(null);setConfirmDeletePlayer(false);}}
               style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:200,display:"flex",alignItems:"flex-end"}}>
               <div onClick={e=>e.stopPropagation()}
                 style={{background:C.white,borderRadius:"20px 20px 0 0",padding:"20px 20px 36px",
@@ -5178,53 +5180,70 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
                 <div style={{width:36,height:4,background:C.light,borderRadius:2,margin:"0 auto 4px"}}/>
                 <div style={{fontSize:16,fontWeight:700,color:C.charcoal}}>Edit Player</div>
 
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Name</div>
-                  <input value={editName} onChange={e=>setEditName(e.target.value)}
-                    style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.light}`,borderRadius:12,
-                      fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
-                </div>
-
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Handicap Index</div>
-                  <input type="number" step="0.1" min="0" max="54" value={editHcp}
-                    onChange={e=>setEditHcp(e.target.value)} placeholder="e.g. 8.4"
-                    style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.light}`,borderRadius:12,
-                      fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
-                </div>
-
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Team</div>
-                  <div style={{display:"flex",gap:10}}>
-                    {[["red","Team Red"],["blue","Team Blue"]].map(([t,label])=>(
-                      <button key={t} onClick={()=>setEditTeam(t)}
-                        style={{flex:1,padding:"11px",borderRadius:12,
-                          border:`2px solid ${editTeam===t?(t==="red"?C.red:C.blue):C.light}`,
-                          background:editTeam===t?(t==="red"?C.redBg:C.blueBg):C.white,
-                          color:editTeam===t?(t==="red"?C.red:C.blue):C.gray,
-                          fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
-                        {label}
-                      </button>
-                    ))}
+                {!confirmDeletePlayer ? (<>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Name</div>
+                    <input value={editName} onChange={e=>setEditName(e.target.value)}
+                      style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.light}`,borderRadius:12,
+                        fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
                   </div>
-                </div>
 
-                <button onClick={savePlayerEdit} disabled={savingEdit}
-                  style={{width:"100%",background:`linear-gradient(135deg,${C.forest},${C.fairway})`,
-                    border:"none",color:C.white,borderRadius:14,padding:14,
-                    fontSize:14,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
-                  {savingEdit?"Saving…":"Save Changes"}
-                </button>
-                <button onClick={deletePlayer}
-                  style={{background:"none",border:`1px solid ${C.red}`,color:C.red,borderRadius:14,
-                    padding:"11px",fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",width:"100%"}}>
-                  Remove from Trip
-                </button>
-                <button onClick={()=>setEditingPlayer(null)}
-                  style={{background:"none",border:"none",color:C.gray,fontSize:13,
-                    fontFamily:"Arial,sans-serif",padding:"4px",cursor:"pointer"}}>
-                  Cancel
-                </button>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Handicap Index</div>
+                    <input type="number" step="0.1" min="0" max="54" value={editHcp}
+                      onChange={e=>setEditHcp(e.target.value)} placeholder="e.g. 8.4"
+                      style={{width:"100%",padding:"12px 14px",border:`1.5px solid ${C.light}`,borderRadius:12,
+                        fontSize:15,fontFamily:"Arial,sans-serif",outline:"none",boxSizing:"border-box"}}/>
+                  </div>
+
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.slate,textTransform:"uppercase",letterSpacing:.7,marginBottom:6,fontFamily:"Arial,sans-serif"}}>Team</div>
+                    <div style={{display:"flex",gap:10}}>
+                      {[["red","Team Red"],["blue","Team Blue"]].map(([t,label])=>(
+                        <button key={t} onClick={()=>setEditTeam(t)}
+                          style={{flex:1,padding:"11px",borderRadius:12,
+                            border:`2px solid ${editTeam===t?(t==="red"?C.red:C.blue):C.light}`,
+                            background:editTeam===t?(t==="red"?C.redBg:C.blueBg):C.white,
+                            color:editTeam===t?(t==="red"?C.red:C.blue):C.gray,
+                            fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button onClick={savePlayerEdit} disabled={savingEdit}
+                    style={{width:"100%",background:`linear-gradient(135deg,${C.forest},${C.fairway})`,
+                      border:"none",color:C.white,borderRadius:14,padding:14,
+                      fontSize:14,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
+                    {savingEdit?"Saving…":"Save Changes"}
+                  </button>
+                  <button onClick={()=>setConfirmDeletePlayer(true)}
+                    style={{background:"none",border:`1px solid ${C.red}`,color:C.red,borderRadius:14,
+                      padding:"11px",fontSize:13,fontFamily:"Arial,sans-serif",fontWeight:600,cursor:"pointer",width:"100%"}}>
+                    Remove from Trip
+                  </button>
+                  <button onClick={()=>setEditingPlayer(null)}
+                    style={{background:"none",border:"none",color:C.gray,fontSize:13,
+                      fontFamily:"Arial,sans-serif",padding:"4px",cursor:"pointer"}}>
+                    Cancel
+                  </button>
+                </>) : (<>
+                  <div style={{background:C.redBg,borderRadius:12,padding:"14px",textAlign:"center"}}>
+                    <div style={{fontSize:14,fontWeight:700,color:C.red,marginBottom:4}}>Remove {editingPlayer.name}?</div>
+                    <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif"}}>This removes them from the trip roster. Cannot be undone.</div>
+                  </div>
+                  <button onClick={confirmDeletePlayerFn}
+                    style={{width:"100%",background:C.red,border:"none",color:C.white,borderRadius:14,
+                      padding:14,fontSize:14,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
+                    Yes, Remove
+                  </button>
+                  <button onClick={()=>setConfirmDeletePlayer(false)}
+                    style={{background:"none",border:"none",color:C.gray,fontSize:13,
+                      fontFamily:"Arial,sans-serif",padding:"4px",cursor:"pointer"}}>
+                    Cancel
+                  </button>
+                </>)}
               </div>
             </div>
           )}
@@ -5414,14 +5433,27 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
               </button>
             </div>
             {showAdjust&&(
-              <div style={{display:"flex",gap:10}}>
-                {[["red","Red +1",C.red,C.redBg],["blue","Blue +1",C.blue,C.blueBg]].map(([team,label,color,bg])=>(
-                  <button key={team} onClick={()=>{ onAdjustPoints?.(team,1); setSaveMsg(`+1 pt to ${team} team`); setTimeout(()=>setSaveMsg(""),2000); }}
-                    style={{flex:1,background:bg,border:`2px solid ${color}`,color,borderRadius:10,
-                      padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
-                    {label}
-                  </button>
-                ))}
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{display:"flex",gap:8}}>
+                  {[["red",C.red,C.redBg],["blue",C.blue,C.blueBg]].map(([team,color,bg])=>(
+                    <div key={team} style={{flex:1,display:"flex",gap:6}}>
+                      <button onClick={()=>{ onAdjustPoints?.(team,-1); setSaveMsg(`-1 pt from ${team} team`); setTimeout(()=>setSaveMsg(""),2000); }}
+                        style={{flex:1,background:C.white,border:`1.5px solid ${color}`,color,borderRadius:10,
+                          padding:"9px 0",fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+                        −
+                      </button>
+                      <button onClick={()=>{ onAdjustPoints?.(team,1); setSaveMsg(`+1 pt to ${team} team`); setTimeout(()=>setSaveMsg(""),2000); }}
+                        style={{flex:1,background:bg,border:`1.5px solid ${color}`,color,borderRadius:10,
+                          padding:"9px 0",fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+                        +
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",paddingTop:2}}>
+                  <span style={{fontSize:11,color:C.red,fontFamily:"Arial,sans-serif",fontWeight:600}}>Team Red</span>
+                  <span style={{fontSize:11,color:C.blue,fontFamily:"Arial,sans-serif",fontWeight:600}}>Team Blue</span>
+                </div>
               </div>
             )}
           </div>
