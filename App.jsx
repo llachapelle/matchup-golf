@@ -5060,17 +5060,22 @@ function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
   const removeTee = i  => setTees(prev=>prev.filter((_,idx)=>idx!==i));
 
   // ── Course Search ────────────────────────────────────────────────────────────
+  const GOLF_API_KEY = import.meta.env.VITE_GOLF_API_KEY || "";
+
   const searchCourses = async () => {
     if(!searchQ.trim()){ setSearchErr("Enter a course or club name"); return; }
+    if(!GOLF_API_KEY){ setSearchErr("Golf API key not configured — enter course details manually below."); return; }
     setSearching(true); setSearchErr(""); setResults(null);
     try {
-      const res = await fetch(`/api/courses?q=${encodeURIComponent(searchQ.trim())}`);
-      // Read as text first so we can show the raw response if JSON parse fails
+      const res = await fetch(
+        `https://api.golfcourseapi.com/v1/search?search_query=${encodeURIComponent(searchQ.trim())}`,
+        { headers: { "Authorization": `Key ${GOLF_API_KEY}` } }
+      );
       const text = await res.text();
       let data;
       try { data = JSON.parse(text); }
-      catch(e){ throw new Error(`Non-JSON response (${res.status}): ${text.slice(0,200)}`); }
-      if(data.error) throw new Error(data.raw ? `${data.error} — ${data.raw}` : data.error);
+      catch(e){ throw new Error(`Unexpected response: ${text.slice(0,150)}`); }
+      if(!res.ok) throw new Error(data.detail || data.error || `Error ${res.status}`);
       const courses = data.courses || [];
       setResults(courses);
       if(courses.length === 0) setSearchErr("No courses found — try a different name or enter manually below.");
@@ -5089,7 +5094,10 @@ function CourseSetupScreen({go, goBack, activeTrip, onCourseAdded}){
     // Fetch full detail to get tee boxes with slope/rating/holes
     if(course.id){
       try {
-        const res = await fetch(`/api/courses?id=${encodeURIComponent(course.id)}`);
+        const res = await fetch(
+          `https://api.golfcourseapi.com/v1/courses/${encodeURIComponent(course.id)}`,
+          { headers: { "Authorization": `Key ${GOLF_API_KEY}` } }
+        );
         const data = await res.json();
         const detail = data.course || data;
         if(detail.tees?.length){
