@@ -6194,7 +6194,7 @@ export default function App(){
   const [screen,          setScreenRaw]      = useState("login");
   const [screenHistory,   setScreenHistory]  = useState([]); // stack of previous screens for accurate Back navigation
   const [selectedMatchId, setSelectedMatchId]= useState(null);
-  const [matches,         setMatches]        = useState(INITIAL_MATCHES);
+  const [matches,         setMatches]        = useState([]);
   const [session,         setSession]        = useState(null);
 
   // While the app is open, proactively refresh the access token every 50
@@ -6585,8 +6585,13 @@ export default function App(){
                   if(joinedTrips.length > 0) trip = joinedTrips[0];
                 }
               }
-              if(trip) await loadTrip(trip);
-              setScreen("dashboard");
+              if(trip){
+                await loadTrip(trip);
+                setScreen("dashboard");
+              } else {
+                // Logged in but no active trip — go straight to trip setup
+                setScreen("setup");
+              }
             } catch(e){ setScreen("dashboard"); }
             setAppReady(true); return;
           } else {
@@ -6603,32 +6608,35 @@ export default function App(){
   const handleAuth = async ({ mode, session: s, trip }) => {
     if(s){
       setSession(s);
-      // Persist session — Supabase tokens last ~1 year by default
       try { localStorage.setItem("matchup_session", JSON.stringify(s)); } catch(e){}
     }
+    let foundTrip = false;
     if(trip){
       await loadTrip(trip);
+      foundTrip = true;
     } else if(s?.user?.id){
       try {
-        // Check trips this user organized first, then fall back to trips
-        // they joined as a player (most common path for non-organizers
-        // signing back in directly rather than via a fresh join code).
         const organized = await db.get("trips",
           `organizer_id=eq.${s.user.id}&status=eq.active&order=created_at.desc&limit=1`);
         if(organized.length > 0){
           await loadTrip(organized[0]);
+          foundTrip = true;
         } else {
           const memberships = await db.get("trip_players",
             `user_id=eq.${s.user.id}&select=trip_id&order=created_at.desc&limit=1`);
           if(memberships.length > 0){
             const joinedTrips = await db.get("trips",
               `id=eq.${memberships[0].trip_id}&status=eq.active&limit=1`);
-            if(joinedTrips.length > 0) await loadTrip(joinedTrips[0]);
+            if(joinedTrips.length > 0){
+              await loadTrip(joinedTrips[0]);
+              foundTrip = true;
+            }
           }
         }
       } catch(e){}
     }
-    setScreen("dashboard");
+    // If no trip found, send them to setup instead of showing empty demo data
+    setScreen(foundTrip ? "dashboard" : "setup");
   };
 
   const handleSignOut = useCallback(() => {
@@ -6636,7 +6644,7 @@ export default function App(){
     setSession(null);
     setActiveTrip(null);
     setTripPlayers([]);
-    setMatches(INITIAL_MATCHES);
+    setMatches([]);
     setScreen("login");
   }, []);
 
