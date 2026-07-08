@@ -1664,15 +1664,19 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
           {m.status==="live"&&<div style={{fontSize:9,color:C.green,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",fontFamily:"Arial,sans-serif",marginBottom:3}}>● LIVE</div>}
           {m.status==="upcoming"&&<div style={{fontSize:9,color:C.gray,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",fontFamily:"Arial,sans-serif",marginBottom:3}}>UPCOMING</div>}
 
-          {/* P1 label */}
+          {/* P1 label — show all players for every format */}
           <div style={{fontSize:13,fontWeight:700,color:topColor,fontFamily:"Arial,sans-serif",
             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {(isScr||isXB) ? (topSide==="p1"?(m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p1) : (m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p2)) : firstName(topLabel)}
+            {topSide==="p1"
+              ? ((m.p1Keys||[]).length>0 ? (m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ") : firstName(m.p1)||"TBD")
+              : ((m.p2Keys||[]).length>0 ? (m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ") : firstName(m.p2)||"TBD")}
             {m.status==="completed"&&m.winnerSide===topSide&&<span style={{marginLeft:5}}>★</span>}
           </div>
           <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",marginTop:1,
             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            vs {(isScr||isXB) ? (topSide==="p1"?(m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p2) : (m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p1)) : firstName(bottomLabel)}
+            vs {topSide==="p1"
+              ? ((m.p2Keys||[]).length>0 ? (m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ") : firstName(m.p2)||"TBD")
+              : ((m.p1Keys||[]).length>0 ? (m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ") : firstName(m.p1)||"TBD")}
           </div>
 
           {/* Date shown on card only when no separate round header is displayed */}
