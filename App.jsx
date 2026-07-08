@@ -2972,7 +2972,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                     {!ydsRange&&<div style={{marginBottom:6}}/>}
                     {/* Scorecard rows: team-only for Scramble, per-player for everything else */}
                     {isScramble ? (
-                      [{key:"team_p1", label:match.p1, team:p1Team}, {key:"team_p2", label:match.p2, team:p2Team}].map(({key,label,team})=>{
+                      [{key:"team_p1", label:p1Team==="red"?"Red Team":"Blue Team", team:p1Team}, {key:"team_p2", label:p2Team==="red"?"Red Team":"Blue Team", team:p2Team}].map(({key,label,team})=>{
                         const teamColor2 = team==="red"?C.red:C.blue;
                         let scoreOut=0,scoreIn=0,hasOut=false,hasIn=false;
                         holeRange.forEach(h=>{
