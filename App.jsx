@@ -699,6 +699,24 @@ const calcCH  = (idx,c) => Math.round(idx*(c.slope/113)+(c.rating-c.par));
 const calcPH  = (ch,fmt) => Math.round(ch*((fmt||"").toLowerCase().includes("singles")?1.0:0.90));
 const calcMS  = phs => { const m=Math.min(...phs); return phs.map(ph=>Math.max(0,ph-m)); };
 const sOnHole = (ms,si) => { if(ms<=0)return 0; return Math.floor(ms/18)+(si<=ms%18?1:0); };
+
+// 9-hole WHS: strokes on hole for a given 9-hole playing handicap (1–9 scale)
+const sOnHole9 = (ms9, si9) => { if(ms9<=0)return 0; return Math.floor(ms9/9)+(si9<=ms9%9?1:0); };
+
+// For 9-hole matches, remap stroke indices so the 9 lowest-SI holes
+// from the full 18 get SI 1–9, rest are excluded. Returns null for holes not in range.
+const remap9HoleSI = (strokeIndex18, holeStart, holeEnd) => {
+  // Build array of {hole, si} for holes in range
+  const inRange = strokeIndex18
+    .map((si,i) => ({hole: i+1, si}))
+    .filter(h => h.hole >= holeStart && h.hole <= holeEnd);
+  // Sort by stroke index, assign new SI 1–9
+  const sorted = [...inRange].sort((a,b)=>a.si-b.si);
+  const remap = {};
+  sorted.forEach((h,i) => { remap[h.hole] = i+1; });
+  return remap; // { holeNumber: newSI1to9 }
+};
+
 function buildPlayers(raw,course,format){
   const a=raw.map(p=>({...p,ch:calcCH(p.index,course)}));
   const b=a.map(p=>({...p,ph:calcPH(p.ch,format)}));
@@ -2404,9 +2422,14 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   const p2Team = p2RawPlayers.length ? p2RawPlayers[0].team
     : realPlayers.find(p=>(match.p2Keys||[]).includes(p.key))?.team || "blue";
 
-  // Seed holeResults from match.holeScores if available (for already-started live matches)
-  // holeNum starts at match.thru (where scoring left off) or 1
-  const [holeNum,      setHoleNum]      = useState(()=>Math.min((match.thru||0)+1, 18));
+  // Derive hole range from match.holes setting
+  const matchHoles  = match.holes || "18";
+  const holeStart   = matchHoles === "back9"  ? 10 : 1;
+  const holeEnd     = matchHoles === "front9" ? 9  : 18;
+  const totalHoles  = holeEnd - holeStart + 1; // 9 or 18
+
+  // holeNum starts at match.thru (where scoring left off) or holeStart
+  const [holeNum,      setHoleNum]      = useState(()=>Math.min(Math.max((match.thru||0)+holeStart, holeStart), holeEnd));
   const [quickMode,    setQuickMode]    = useState(false);
   const [showUndo,     setShowUndo]     = useState(false);
   const [expandSide,   setExpandSide]   = useState(false);
@@ -2568,15 +2591,28 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       );
 
   // Get net score for any player key (RAW uses WHS, guest uses GUEST_PLAYERS handicap, unknown uses gross)
-  const getNetLive = (key, scores, holeNum) => {
+  // For 9-hole matches: remap stroke indices to 1-9 scale
+  const si9Remap = (matchHoles !== "18" && course.strokeIndex)
+    ? remap9HoleSI(course.strokeIndex, holeStart, holeEnd)
+    : null;
+
+  const getNetLive = (key, scores, hNum) => {
     const gross = parseInt(scores[key]);
     if(isNaN(gross) || gross <= 0) return Infinity;
-    const hSI = course.strokeIndex[holeNum-1];
     const rawP = players.find(pl=>pl.key===key);
-    if(rawP) return gross - sOnHole(rawP.ms, hSI);
+    if(rawP){
+      if(si9Remap){
+        // 9-hole match: use 9-hole playing handicap (half of 18-hole PH, rounded)
+        const ph9 = Math.round(rawP.ph / 2);
+        const ms9List = calcMS(players.map(p=>Math.round(p.ph/2)));
+        const ms9 = ms9List[players.indexOf(rawP)] || 0;
+        const si9 = si9Remap[hNum] || 99;
+        return gross - sOnHole9(ms9, si9);
+      }
+      return gross - sOnHole(rawP.ms, course.strokeIndex[hNum-1]);
+    }
     const guestP = GUEST_PLAYERS[key];
     if(guestP){
-      // Compute guest PH relative to side's min PH
       const sideKeys = (match.p1Keys||[]).includes(key)
         ? [...(match.p1Keys||[]), ...p1ExtPlayers.map(p=>p.key)]
         : [...(match.p2Keys||[]), ...p2ExtPlayers.map(p=>p.key)];
@@ -2591,9 +2627,13 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       }).filter(v=>v!==null);
       const minPH = Math.min(...sidePHs, gPH);
       const gMS   = Math.max(0, gPH - minPH);
-      return gross - sOnHole(gMS, hSI);
+      if(si9Remap){
+        const si9 = si9Remap[hNum] || 99;
+        return gross - sOnHole9(Math.round(gMS/2), si9);
+      }
+      return gross - sOnHole(gMS, course.strokeIndex[hNum-1]);
     }
-    return gross; // unknown: gross as-is
+    return gross;
   };
 
   const computeHoleWinner = (scores) => {
@@ -2646,7 +2686,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     // Scramble: stroke play — show running totals
     if(isScramble){
       let t1=0,t2=0,h1=0,h2=0;
-      for(let h=1;h<=18;h++){
+      for(let h=holeStart;h<=holeEnd;h++){
         const hs=holeScores[h]||{};
         const s1=parseInt(hs["team_p1"]), s2=parseInt(hs["team_p2"]);
         if(!isNaN(s1)&&s1>0){t1+=s1;h1++;}
@@ -2654,7 +2694,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       }
       if(h1===0&&h2===0) return {text:"Not started", color:"rgba(255,255,255,.8)"};
       const thruStr = h1>0&&h2>0&&h1===h2?`thru ${h1}`:h1>0||h2>0?`(${match.p1.split(" / ")[0]}: thru ${h1}, ${match.p2.split(" / ")[0]}: thru ${h2})`:"";
-      if(h1===18&&h2===18){
+      if(h1===totalHoles&&h2===totalHoles){
         if(t1<t2) return {text:`${match.p1} wins (${t1} vs ${t2})`, color:p1Col};
         if(t2<t1) return {text:`${match.p2} wins (${t2} vs ${t1})`, color:p2Col};
         return {text:`Tied (${t1} each)`, color:"rgba(255,255,255,.8)"};
@@ -2662,16 +2702,10 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       return {text:`${match.p1}: ${t1||"—"} · ${match.p2}: ${t2||"—"} ${thruStr}`, color:"rgba(255,255,255,.85)"};
     }
 
-    // Match play (best ball, alt shot, singles, etc.)
-    // Once a match is mathematically decided (e.g. "5&3"), the result is
-    // LOCKED at that exact margin — additional holes can still be entered
-    // for fun/practice, but they never change the official outcome. This
-    // mirrors how match play actually works: the match is over the moment
-    // a side's lead exceeds the holes remaining, regardless of what happens
-    // on any holes played afterward.
+    // Match play
     let p1=0,p2=0,ties=0;
-    let decidedAt = null; // {diff, remAtDecision, holeNumber} — set the moment the match is won
-    for(let h=1;h<=18;h++){
+    let decidedAt = null;
+    for(let h=holeStart;h<=holeEnd;h++){
       if(results[h]==="p1")p1++;
       else if(results[h]==="p2")p2++;
       else if(results[h]==="tie")ties++;
@@ -2679,7 +2713,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       if(!decidedAt){
         const playedSoFar = p1+p2+ties;
         const diffSoFar = p1-p2;
-        const remSoFar = 18-playedSoFar;
+        const remSoFar = totalHoles-playedSoFar;
         if(Math.abs(diffSoFar) > remSoFar){
           decidedAt = { diff: diffSoFar, rem: remSoFar };
         }
@@ -2690,16 +2724,14 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     if(played===0) return {text:match.liveScore||"Not started", color:"rgba(255,255,255,.8)"};
     const p1Label=match.p1, p2Label=match.p2;
 
-    // Match already mathematically won — report the FROZEN margin, not a
-    // recalculated one based on any extra holes played after the win.
     if(decidedAt){
       const {diff, rem} = decidedAt;
       if(diff>0) return {text:`${p1Label} wins ${diff}&${rem}`, color:p1Col};
       return {text:`${p2Label} wins ${-diff}&${rem}`, color:p2Col};
     }
 
-    const diff=p1-p2, rem=18-played;
-    if(played===18){
+    const diff=p1-p2, rem=totalHoles-played;
+    if(played===totalHoles){
       if(diff>0) return {text:`${p1Label} wins 1UP`, color:p1Col};
       if(diff<0) return {text:`${p2Label} wins 1UP`, color:p2Col};
       return {text:"All Square", color:"rgba(255,255,255,.8)"};
@@ -2714,7 +2746,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   const preview = allEntered ? computeHoleWinner(curScores) : null;
 
   const advanceHole = () => {
-    if(holeNum<18) setHoleNum(holeNum+1);
+    if(holeNum<holeEnd) setHoleNum(holeNum+1);
     else setShowSummary(true);
   };
 
@@ -2809,7 +2841,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
 
   const undoHole = async () => {
     const last = holeNum-1;
-    if(last<1) return;
+    if(last<holeStart) return;
     const newResults    = {...holeResults};  delete newResults[last];
     const newHoleScores = {...holeScores};   delete newHoleScores[last];
     setHoleResults(newResults);
@@ -2879,17 +2911,24 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
               individual player whose score actually won the hole highlighted
               (not their whole side) in their team's color. */}
           <div style={card()}>
-            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Scorecard</div>
+            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>
+              Scorecard {matchHoles!=="18"&&<span style={{fontSize:11,color:C.gray,fontWeight:400}}>· {matchHoles==="front9"?"Front 9":"Back 9"}</span>}
+            </div>
             <div style={{overflowX:"auto"}}>
-              <div style={{minWidth:18*26+50+90}}>
-                {/* Helper: total for a set of holes */}
+              <div style={{minWidth:totalHoles*26+50+(matchHoles==="18"?90:30)}}>
                 {(() => {
-                  const parOut  = course.pars.slice(0,9).reduce((a,b)=>a+b,0);
-                  const parIn   = course.pars.slice(9,18).reduce((a,b)=>a+b,0);
-                  const parTot  = parOut+parIn;
-                  const ydsOut  = course.yardages ? course.yardages.slice(0,9).reduce((a,b)=>a+(b||0),0) : null;
-                  const ydsIn   = course.yardages ? course.yardages.slice(9,18).reduce((a,b)=>a+(b||0),0) : null;
-                  const ydsTot  = ydsOut!=null ? ydsOut+ydsIn : null;
+                  const holeRange = Array.from({length:totalHoles},(_,i)=>holeStart+i);
+                  const is9 = matchHoles !== "18";
+
+                  // For 18-hole: Out/In/Tot columns. For 9-hole: just Tot column.
+                  const parRange  = holeRange.map(h=>course.pars[h-1]||4);
+                  const parOut    = is9 ? null : course.pars.slice(0,9).reduce((a,b)=>a+b,0);
+                  const parIn     = is9 ? null : course.pars.slice(9,18).reduce((a,b)=>a+b,0);
+                  const parTot    = parRange.reduce((a,b)=>a+b,0);
+                  const ydsRange  = course.yardages ? holeRange.map(h=>course.yardages[h-1]||0) : null;
+                  const ydsOut    = is9||!course.yardages ? null : course.yardages.slice(0,9).reduce((a,b)=>a+(b||0),0);
+                  const ydsIn     = is9||!course.yardages ? null : course.yardages.slice(9,18).reduce((a,b)=>a+(b||0),0);
+                  const ydsTot    = ydsRange ? ydsRange.reduce((a,b)=>a+(b||0),0) : null;
 
                   const totCell = (val, bold=false, bg=C.smoke) => (
                     <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -2901,21 +2940,36 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                     {/* Hole number header */}
                     <div style={{display:"flex",gap:2,marginBottom:2,alignItems:"center"}}>
                       <div style={{width:60,flexShrink:0}}/>
-                      {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                      {holeRange.map(h=>(
                         <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>
                       ))}
-                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Out</div>
-                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>In</div>
+                      {!is9&&<div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Out</div>}
+                      {!is9&&<div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>In</div>}
                       <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>Tot</div>
                     </div>
                     {/* Par row */}
                     <div style={{display:"flex",gap:2,marginBottom:1,alignItems:"center"}}>
                       <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Par</div>
-                      {Array.from({length:18},(_,i)=>i+1).map(h=>(
+                      {holeRange.map(h=>(
                         <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{course.pars[h-1]}</div>
                       ))}
-                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{parOut}</div>
-                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{parIn}</div>
+                      {!is9&&<div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{parOut}</div>}
+                      {!is9&&<div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,color:C.slate,fontFamily:"Arial,sans-serif"}}>{parIn}</div>}
+                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{parTot}</div>
+                    </div>
+                    {/* Yardage row */}
+                    {ydsRange&&(
+                      <div style={{display:"flex",gap:2,marginBottom:6,alignItems:"center"}}>
+                        <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Yards</div>
+                        {holeRange.map(h=>(
+                          <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{course.yardages[h-1]||"—"}</div>
+                        ))}
+                        {!is9&&<div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{ydsOut}</div>}
+                        {!is9&&<div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{ydsIn}</div>}
+                        <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{ydsTot}</div>
+                      </div>
+                    )}
+                    {!ydsRange&&<div style={{marginBottom:6}}/>}
                       <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{parTot}</div>
                     </div>
                     {/* Yardage row */}
@@ -2933,38 +2987,32 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                     {!course.yardages&&<div style={{marginBottom:6}}/>}
                     {/* Scorecard rows: team-only for Scramble, per-player for everything else */}
                     {isScramble ? (
-                      // Scramble: just two team rows using team_p1/team_p2 score keys
                       [{key:"team_p1", label:match.p1, team:p1Team}, {key:"team_p2", label:match.p2, team:p2Team}].map(({key,label,team})=>{
                         const teamColor2 = team==="red"?C.red:C.blue;
-                        const teamBg2    = team==="red"?C.redBg:C.blueBg;
                         let scoreOut=0,scoreIn=0,hasOut=false,hasIn=false;
-                        for(let h=1;h<=18;h++){
+                        holeRange.forEach(h=>{
                           const g=parseInt(holeScores[h]?.[key]);
                           if(!isNaN(g)&&g>0){
                             if(h<=9){scoreOut+=g;hasOut=true;}
                             else{scoreIn+=g;hasIn=true;}
                           }
-                        }
+                        });
                         const scoreTot=scoreOut+scoreIn;
                         return(
                           <div key={key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
-                            <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:teamColor2,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                              {label}
-                            </div>
-                            {Array.from({length:18},(_,i)=>i+1).map(h=>{
+                            <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:teamColor2,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</div>
+                            {holeRange.map(h=>{
                               const gross=parseInt(holeScores[h]?.[key]);
                               const hasScore=!isNaN(gross)&&gross>0;
                               const par=course.pars[h-1]||4;
                               const rel=hasScore?gross-par:null;
                               const bg=rel===null?C.smoke:rel<=-1?C.greenBg:rel===0?C.white:C.redBg;
-                              return(
-                                <div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                                  <span style={{fontSize:10,fontWeight:600,color:hasScore?C.charcoal:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
-                                </div>
-                              );
+                              return(<div key={h} style={{flex:1,minWidth:24,height:24,borderRadius:5,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                <span style={{fontSize:10,fontWeight:600,color:hasScore?C.charcoal:C.light,fontFamily:"Arial,sans-serif"}}>{hasScore?gross:"·"}</span>
+                              </div>);
                             })}
-                            {totCell(hasOut?scoreOut:"·")}
-                            {totCell(hasIn?scoreIn:"·")}
+                            {!is9&&totCell(hasOut?scoreOut:"·")}
+                            {!is9&&totCell(hasIn?scoreIn:"·")}
                             <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:C.charcoal,display:"flex",alignItems:"center",justifyContent:"center"}}>
                               <span style={{fontSize:10,fontWeight:700,color:C.white,fontFamily:"Arial,sans-serif"}}>{(hasOut||hasIn)?scoreTot:"·"}</span>
                             </div>
@@ -2972,26 +3020,25 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                         );
                       })
                     ) : (
-                      // All other formats: per-player rows
                       [...p1Players,...p2Players].map((p,pi)=>{
                         const isExt = p.isExternal;
                         const sideTeam = pi<p1Players.length ? p1Team : p2Team;
                         const sideColor = sideTeam==="red"?C.red:C.blue;
                         let scoreOut=0, scoreIn=0, hasOut=false, hasIn=false;
-                        for(let h=1;h<=18;h++){
+                        holeRange.forEach(h=>{
                           const g = parseInt(holeScores[h]?.[p.key]);
                           if(!isNaN(g)&&g>0){
                             if(h<=9){ scoreOut+=g; hasOut=true; }
                             else    { scoreIn+=g;  hasIn=true;  }
                           }
-                        }
+                        });
                         const scoreTot = scoreOut+scoreIn;
                         return(
                           <div key={p.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
                             <div style={{width:60,flexShrink:0,fontSize:10,fontWeight:700,color:sideColor,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                               {p.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
                             </div>
-                            {Array.from({length:18},(_,i)=>i+1).map(h=>{
+                            {holeRange.map(h=>{
                               const gross = parseInt(holeScores[h]?.[p.key]);
                               const hasScore = !isNaN(gross) && gross>0;
                               const res = holeResults[h];
@@ -3014,8 +3061,8 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                                 </div>
                               );
                             })}
-                            {totCell(hasOut?scoreOut:"·")}
-                            {totCell(hasIn?scoreIn:"·")}
+                            {!is9&&totCell(hasOut?scoreOut:"·")}
+                            {!is9&&totCell(hasIn?scoreIn:"·")}
                             <div style={{width:28,flexShrink:0,height:24,borderRadius:5,background:C.charcoal,display:"flex",alignItems:"center",justifyContent:"center"}}>
                               <span style={{fontSize:10,fontWeight:700,color:C.white,fontFamily:"Arial,sans-serif"}}>
                                 {(hasOut||hasIn)?scoreTot:"·"}
@@ -3113,7 +3160,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                 score_data:null, banked_scores:null, winner_side:null, score:null
               });
               // Reset local state
-              setHoleScores({}); setHoleResults({}); setHoleNum(1);
+              setHoleScores({}); setHoleResults({}); setHoleNum(holeStart);
               setShowSummary(false);
             }}
               style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.7)",borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:600}}>
@@ -3209,7 +3256,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
           Only meaningful for match-play formats where each hole has a winner;
           Scramble and X-Ball don't have per-hole winners so dots stay neutral there. */}
       <div style={{background:C.white,padding:"9px 14px",display:"flex",gap:3,justifyContent:"center",borderBottom:`1px solid ${C.mist}`}}>
-        {Array.from({length:18},(_,i)=>i+1).map(h=>{
+        {Array.from({length:totalHoles},(_,i)=>holeStart+i).map(h=>{
           const res=holeResults[h], cur=h===holeNum;
           const showResultColor = !isScramble && !isXBall; // match-play only
           const winColor = res==="p1" ? (p1Team==="red"?C.redBright:C.blueBright)
@@ -5860,6 +5907,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
     return new Date().toISOString().split("T")[0];
   });
   const [roundName,      setRoundName]     = useState(isEdit ? (editMatch.round_name||"") : "");
+  const [holes,          setHoles]         = useState(isEdit ? (editMatch.holes||"18") : "18");
   const [selectedCourse, setSelectedCourse]= useState(null);
   const [selectedTee,    setSelectedTee]   = useState(null);
   const [saving,         setSaving]        = useState(false);
@@ -5900,6 +5948,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
         thru:          isEdit ? (editMatch.thru||0) : 0,
         match_date:    matchDate || new Date().toISOString().split("T")[0],
         round_name:    roundName.trim() || null,
+        holes:         holes,
         // Only update course/tee if user actually selected one — preserve existing on edit
         course_name:   selectedCourse?.name || (isEdit ? editMatch.course_name : null),
         tee_name:      selectedTee?.name    || (isEdit ? editMatch.tee_name    : null),
@@ -5931,6 +5980,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           hole_data:     matchData.hole_data,
           match_date:    matchData.match_date,
           round_name:    matchData.round_name,
+          holes:         matchData.holes,
         });
         onMatchCreated && onMatchCreated({
           ...editMatch,
@@ -5949,6 +5999,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           hole_data:   matchData.hole_data,
           match_date:  matchData.match_date,
           round_name:  matchData.round_name,
+          holes:       matchData.holes,
         });
       } else {
         // Create new match
@@ -5963,6 +6014,7 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           hole_data: matchData.hole_data,
           match_date: matchData.match_date,
           round_name: matchData.round_name,
+          holes:      matchData.holes,
         });
       }
       go("trip");
@@ -6053,6 +6105,28 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
           {roundName.trim()&&(
             <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:6}}>
               This match will group with other "{roundName.trim()}" matches on the Matches tab.
+            </div>
+          )}
+        </div>
+
+        {/* Holes picker — 18, Front 9, Back 9 */}
+        <div style={card()}>
+          <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:10}}>Holes</div>
+          <div style={{display:"flex",gap:8}}>
+            {[["18","18 Holes"],["front9","Front 9"],["back9","Back 9"]].map(([val,label])=>(
+              <button key={val} onClick={()=>setHoles(val)}
+                style={{flex:1,padding:"10px 6px",borderRadius:12,fontSize:12,fontWeight:700,
+                  fontFamily:"Arial,sans-serif",cursor:"pointer",
+                  background:holes===val?C.forest:C.smoke,
+                  color:holes===val?C.white:C.gray,
+                  border:`1.5px solid ${holes===val?C.forest:C.light}`}}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {holes!=="18"&&(
+            <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:8}}>
+              {holes==="front9"?"Holes 1–9 · WHS handicaps adjusted for 9 holes":"Holes 10–18 · WHS handicaps adjusted for 9 holes"}
             </div>
           )}
         </div>
@@ -6719,6 +6793,7 @@ export default function App(){
           course_name: m.course_name || null,
           match_date:  m.match_date  || null,
           round_name:  m.round_name  || null,
+          holes:       m.holes       || "18",
           tee_name:    m.tee_name    || null,
           slope:       m.slope       || null,
           rating:      m.rating      || null,
