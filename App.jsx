@@ -3508,13 +3508,14 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                   {/* Player/team rows */}
                   {isScramble ? (
                     // Scramble: show one row per team with team scores
-                    [{label:match.p1, team:p1Team, key:"team_p1"}, {label:match.p2, team:p2Team, key:"team_p2"}].map(side=>{
+                    [{team:p1Team, key:"team_p1"}, {team:p2Team, key:"team_p2"}].map(side=>{
                       const tc = side.team==="red"?C.red:C.blue;
+                      const teamLabel = side.team==="red" ? "Red Team" : "Blue Team";
                       const total = playedHoles.reduce((s,h)=>{const v=parseInt((holeScores[h]||{})[side.key]);return s+(isNaN(v)?0:v);},0);
                       return(
                         <div key={side.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
                           <div style={{width:46,fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            {side.label.split(" / ")[0]}
+                            {teamLabel}
                           </div>
                           {playedHoles.map(h=>{
                             const val=(holeScores[h]||{})[side.key];
