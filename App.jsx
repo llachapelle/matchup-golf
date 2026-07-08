@@ -2970,21 +2970,6 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                       </div>
                     )}
                     {!ydsRange&&<div style={{marginBottom:6}}/>}
-                      <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:9,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{parTot}</div>
-                    </div>
-                    {/* Yardage row */}
-                    {course.yardages&&(
-                      <div style={{display:"flex",gap:2,marginBottom:6,alignItems:"center"}}>
-                        <div style={{width:60,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Yards</div>
-                        {Array.from({length:18},(_,i)=>i+1).map(h=>(
-                          <div key={h} style={{flex:1,minWidth:24,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{course.yardages[h-1]||"—"}</div>
-                        ))}
-                        <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{ydsOut}</div>
-                        <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,color:C.gray,fontFamily:"Arial,sans-serif"}}>{ydsIn}</div>
-                        <div style={{width:28,flexShrink:0,textAlign:"center",fontSize:8,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{ydsTot}</div>
-                      </div>
-                    )}
-                    {!course.yardages&&<div style={{marginBottom:6}}/>}
                     {/* Scorecard rows: team-only for Scramble, per-player for everything else */}
                     {isScramble ? (
                       [{key:"team_p1", label:match.p1, team:p1Team}, {key:"team_p2", label:match.p2, team:p2Team}].map(({key,label,team})=>{
