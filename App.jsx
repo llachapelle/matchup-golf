@@ -2972,7 +2972,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                     {!ydsRange&&<div style={{marginBottom:6}}/>}
                     {/* Scorecard rows: team-only for Scramble, per-player for everything else */}
                     {isScramble ? (
-                      [{key:"team_p1", label:p1Team==="red"?"Red Team":"Blue Team", team:p1Team}, {key:"team_p2", label:p2Team==="red"?"Red Team":"Blue Team", team:p2Team}].map(({key,label,team})=>{
+                      [{key:"team_p1", label:p1Team==="red"?"Red":"Blue", team:p1Team}, {key:"team_p2", label:p2Team==="red"?"Red":"Blue", team:p2Team}].map(({key,label,team})=>{
                         const teamColor2 = team==="red"?C.red:C.blue;
                         let scoreOut=0,scoreIn=0,hasOut=false,hasIn=false;
                         holeRange.forEach(h=>{
@@ -3510,7 +3510,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                     // Scramble: show one row per team with team scores
                     [{team:p1Team, key:"team_p1"}, {team:p2Team, key:"team_p2"}].map(side=>{
                       const tc = side.team==="red"?C.red:C.blue;
-                      const teamLabel = side.team==="red" ? "Red Team" : "Blue Team";
+                      const teamLabel = side.team==="red" ? "Red" : "Blue";
                       const total = playedHoles.reduce((s,h)=>{const v=parseInt((holeScores[h]||{})[side.key]);return s+(isNaN(v)?0:v);},0);
                       return(
                         <div key={side.key} style={{display:"flex",gap:2,marginBottom:3,alignItems:"center"}}>
