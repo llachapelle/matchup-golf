@@ -1747,9 +1747,13 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
                   </div>
                   <div style={{fontSize:10,color:winColor2,fontFamily:"Arial,sans-serif",opacity:.8,marginTop:1}}>{(()=>{
                     const s=m.score||"";
-                    // Already score-to-par format
-                    if(!s||s.includes("E")||s.includes("+")||s.match(/\([-\d]/)) return s;
-                    // Old raw format "72 vs 74" — recompute from holeScores
+                    // Already score-to-par: contains E, +N, or (-N
+                    if(!s||s.includes(" E")||s===("E")||s.includes("+")||s.match(/\(-\d/)) {
+                      // Strip team name prefix if present e.g. "Red wins (-2 vs +1)" → "-2 vs +1"
+                      const inner = s.replace(/^(Red|Blue)\s+wins\s*/i,"").replace(/^\(|\)$/g,"");
+                      return inner||s;
+                    }
+                    // Old raw format e.g. "72 vs 74" or "Louie/... wins (72 vs 74)" — recompute from holeScores
                     const hs=m.holeScores||{};
                     const pars=(()=>{try{const hd=typeof m.hole_data==="string"?JSON.parse(m.hole_data):m.hole_data;if(Array.isArray(hd)&&hd.length===18)return hd.map(h=>h.par);}catch(e){}return[4,5,4,3,5,4,3,4,4,4,5,4,3,4,5,4,3,5];})();
                     const totalPar=pars.reduce((a,b)=>a+b,0);
@@ -1891,6 +1895,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   const [holeOverrides, setHoleOverrides] = useState({});
   const [holeScores,    setHoleScores]    = useState({});
   const [holeScoresInit,setHoleScoresInit]= useState(false);
+  const [bankedScoresEdit, setBankedScoresEdit] = useState({});
 
   const match = (matches||[]).find(m=>m.id===matchId)
              || (matches||[]).find(m=>m.status==="completed")
@@ -1903,6 +1908,9 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
     const out  = {};
     for(let h=1;h<=18;h++) out[h] = seed[h] ? {...seed[h]} : {};
     setHoleScores(out);
+    // Seed banked scores from match.bankedScores
+    const bankedSeed = match.bankedScores || {};
+    setBankedScoresEdit(typeof bankedSeed==="string" ? JSON.parse(bankedSeed) : bankedSeed);
     setHoleScoresInit(true);
   }, [match?.id]);
 
@@ -2154,9 +2162,10 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
     })();
     updateMatch(match.id, {
       winnerSide: finalWinner,
-      score:      matchScore.text.replace(/ thru \d+/,""), // strip "thru N" from score string
+      score:      matchScore.text.replace(/ thru \d+/,""),
       status:     "completed",
       holeScores: cleanScores,
+      bankedScores: isXBallEdit ? bankedScoresEdit : undefined,
     });
     setSaved(true);
     setTimeout(()=>{ setSaved(false); go("matches"); }, 800);
@@ -2223,7 +2232,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
               : "Hole winners derived from scores. Tap to override manually."}
           </div>
           {/* Only show Scores/Winners tabs for match-play formats */}
-          {!isXBallEdit&&(
+          {!isXBallEdit&&!isScrambleEdit&&(
           <div style={{display:"flex",gap:6,marginBottom:14}}>
             {["Scores","Winners"].map(t=>(
               <button key={t} onClick={()=>setScoreTab(t)}
@@ -2237,34 +2246,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
           )}
 
           {/* ── SCORES TAB ── */}
-          {(scoreTab==="Scores"||isXBallEdit)&&(
+          {(scoreTab==="Scores"||isXBallEdit||isScrambleEdit)&&(
             <>
-              {/* XBall: show banked status per player */}
-              {isXBallEdit&&(
-                <div style={{marginBottom:12,background:C.mist,borderRadius:10,padding:"10px 12px"}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:8}}>
-                    Banked Status · Target: {xBallTargetEdit} per player
-                  </div>
-                  {[...p1Players,...p2Players].map((player,pi)=>{
-                    const tc = pi<p1Players.length?p1TeamColor:p2TeamColor;
-                    // Count banked holes from holeScores
-                    let banked=0;
-                    for(let h=1;h<=18;h++){
-                      const v=parseInt(holeScores[h]?.[player.key]);
-                      if(!isNaN(v)&&v>0) banked++;
-                    }
-                    const done = banked>=xBallTargetEdit;
-                    return(
-                      <div key={player.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:`1px solid ${C.light}`}}>
-                        <div style={{fontSize:12,fontWeight:600,color:tc,fontFamily:"Arial,sans-serif"}}>{player.name}</div>
-                        <div style={{fontSize:12,fontWeight:700,color:done?C.green:C.amber,fontFamily:"Arial,sans-serif"}}>
-                          {banked}/{xBallTargetEdit} {done?"✓":""}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
               {[
                 {label:"Front 9", holes:Array.from({length:9},(_,i)=>i+1)},
                 {label:"Back 9",  holes:Array.from({length:9},(_,i)=>i+10)},
@@ -2276,7 +2259,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                   <div style={{display:"flex",gap:3,marginBottom:3}}>
                     <div style={{width:46,flexShrink:0}}/>
                     {holes.map(h=>(<div key={h} style={{flex:1,textAlign:"center",fontSize:10,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>))}
-                    <div style={{width:28,textAlign:"center",fontSize:10,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif"}}>Tot</div>
+                    <div style={{width:28,textAlign:"center",fontSize:10,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif"}}>{isXBallEdit?"Bkd":"Tot"}</div>
                   </div>
 
                   {/* Par row */}
@@ -2421,6 +2404,39 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                       })}
                     </>
                   )}
+
+                  {/* XBall: banked toggle row per player */}
+                  {isXBallEdit&&[...p1Players,...p2Players].map((player,pi)=>{
+                    const tc = pi<p1Players.length?p1TeamColor:p2TeamColor;
+                    return(
+                      <div key={`bkd_${player.key}`} style={{display:"flex",gap:3,marginTop:3,alignItems:"center"}}>
+                        <div style={{width:46,fontSize:9,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {player.name} bkd
+                        </div>
+                        {holes.map(h=>{
+                          const hasScore = parseInt(holeScores[h]?.[player.key])>0;
+                          const isBanked = !!(bankedScoresEdit[player.key]?.[h]);
+                          if(!hasScore) return <div key={h} style={{flex:1,height:18}}/>;
+                          return(
+                            <button key={h} onClick={()=>!locked&&setBankedScoresEdit(prev=>({
+                              ...prev,
+                              [player.key]:{...(prev[player.key]||{}),[h]:!isBanked}
+                            }))}
+                              style={{flex:1,height:18,borderRadius:4,border:"none",cursor:locked?"default":"pointer",
+                                background:isBanked?tc:"transparent",
+                                display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              <span style={{fontSize:8,fontWeight:700,color:isBanked?C.white:C.light,fontFamily:"Arial,sans-serif"}}>
+                                {isBanked?"B":"·"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                        <div style={{width:28,textAlign:"center",fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif"}}>
+                          {Object.values(bankedScoresEdit[player.key]||{}).filter(Boolean).length}
+                        </div>
+                      </div>
+                    );
+                  })}
 
                   {/* Hole result row — match play only */}
                   {!isScrambleEdit&&!isXBallEdit&&(
