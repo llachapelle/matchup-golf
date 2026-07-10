@@ -1672,11 +1672,14 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
               : ((m.p2Keys||[]).length>0 ? (m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ") : firstName(m.p2)||"TBD")}
             {m.status==="completed"&&m.winnerSide===topSide&&<span style={{marginLeft:5}}>★</span>}
           </div>
-          <div style={{fontSize:12,color:C.slate,fontFamily:"Arial,sans-serif",marginTop:1,
+          <div style={{fontSize:12,fontFamily:"Arial,sans-serif",marginTop:1,
             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            vs {topSide==="p1"
+            <span style={{color:C.gray,fontSize:11}}>vs </span>
+            <span style={{color:botColor,fontWeight:600}}>
+            {topSide==="p1"
               ? ((m.p2Keys||[]).length>0 ? (m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ") : firstName(m.p2)||"TBD")
               : ((m.p1Keys||[]).length>0 ? (m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ") : firstName(m.p1)||"TBD")}
+            </span>
           </div>
 
           {/* Date shown on card only when no separate round header is displayed */}
@@ -1720,10 +1723,35 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
             <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
           </>}
           {m.status==="completed"&&<>
-            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,textAlign:"right"}}>{m.score||"—"}</div>
-            <div style={{fontSize:10,color:C.gray,textAlign:"right",marginTop:2}}>
-              {m.winnerSide==="halve"?"Halved":m.winnerSide==="p1"?`${m.p1} wins`:m.winnerSide==="p2"?`${m.p2} wins`:""}
-            </div>
+            {isScr ? (
+              // Scramble: show winning team clearly with color
+              <div style={{textAlign:"right"}}>
+                {m.winnerSide==="halve" ? (
+                  <div style={{fontSize:12,fontWeight:700,color:C.gray}}>Tied</div>
+                ) : (()=>{
+                  const winTeam = m.winnerSide==="p1"?p1Team:p2Team;
+                  const winColor2 = winTeam==="red"?C.red:C.blue;
+                  const winBg = winTeam==="red"?C.redBg:C.blueBg;
+                  return(
+                    <div style={{background:winBg,borderRadius:8,padding:"4px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif"}}>
+                        {winTeam==="red"?"RED":"BLUE"} WINS
+                      </div>
+                      <div style={{fontSize:10,color:winColor2,fontFamily:"Arial,sans-serif",opacity:.8,marginTop:1}}>
+                        {m.score||""}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <>
+                <div style={{fontSize:13,fontWeight:700,color:C.charcoal,textAlign:"right"}}>{m.score||"—"}</div>
+                <div style={{fontSize:10,color:C.gray,textAlign:"right",marginTop:2}}>
+                  {m.winnerSide==="halve"?"Halved":m.winnerSide==="p1"?`${firstName(m.p1)} wins`:m.winnerSide==="p2"?`${firstName(m.p2)} wins`:""}
+                </div>
+              </>
+            )}
           </>}
           {m.status==="upcoming"&&(
             <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"6px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Start →</button>
@@ -1761,7 +1789,7 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
               <div style={{fontSize:11,color:C.slate,fontFamily:"Arial,sans-serif",fontWeight:600}}>
                 {m.format||"Best Ball"}{m.course_name?` · ${m.course_name}`:""}
               </div>
-              <button onClick={e=>{e.stopPropagation();go("matchedit");}}
+              <button onClick={e=>{e.stopPropagation();goMatch(m.id,"matchedit");}}
                 style={{background:"none",border:"none",color:C.forest,fontSize:12,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>
                 Edit ✏️
               </button>
@@ -3708,8 +3736,8 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                       </div>
                     );
                   }))}
-                  {/* Hole result row — match play only */}
-                  {!isScramble&&(
+                  {/* Hole result row — match play only, not scramble or xball */}
+                  {!isScramble&&!isXBall&&(
                   <div style={{display:"flex",gap:2,marginTop:6,alignItems:"center"}}>
                     <div style={{width:46,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif",flexShrink:0}}>Result</div>
                     {playedHoles.map(h=>{
