@@ -1869,24 +1869,43 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
 
 // ─── MATCH EDIT SCREEN ────────────────────────────────────────────────────────
 function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers}){
-  const match = matches.find(m=>m.id===matchId)
-             || matches.find(m=>m.status==="completed")
-             || matches[0];
+  // ALL hooks must come before any conditional returns (Rules of Hooks)
+  const [scoreTab,      setScoreTab]      = useState("Scores");
+  const [locked,        setLocked]        = useState(false);
+  const [confirm,       setConfirm]       = useState(false);
+  const [saved,         setSaved]         = useState(false);
+  const [holeOverrides, setHoleOverrides] = useState({});
+  const [holeScores,    setHoleScores]    = useState({});
+  const [holeScoresInit,setHoleScoresInit]= useState(false);
+
+  const match = (matches||[]).find(m=>m.id===matchId)
+             || (matches||[]).find(m=>m.status==="completed")
+             || (matches||[])[0];
+
+  // Seed holeScores once match is known
+  useEffect(()=>{
+    if(!match||holeScoresInit) return;
+    const seed = match.holeScores||{};
+    const out  = {};
+    for(let h=1;h<=18;h++) out[h] = seed[h] ? {...seed[h]} : {};
+    setHoleScores(out);
+    setHoleScoresInit(true);
+  }, [match?.id]);
+
   if(!match) return(
     <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:24,background:C.smoke}}>
-      <div style={{fontSize:13,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",lineHeight:1.6}}>
-        <div style={{fontWeight:700,marginBottom:8}}>Debug Info</div>
-        <div>matchId: {matchId||"null"}</div>
-        <div>matches count: {matches?.length||0}</div>
-        <div>completed: {matches?.filter(m=>m.status==="completed").length||0}</div>
-        <div>match ids: {matches?.slice(0,3).map(m=>m.id?.slice(0,8)).join(", ")}</div>
+      <div style={{fontSize:13,color:C.charcoal,fontFamily:"Arial,sans-serif",textAlign:"center",lineHeight:1.8}}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:10}}>Match not found</div>
+        <div style={{color:C.gray}}>ID: {String(matchId||"none").slice(0,12)}</div>
+        <div style={{color:C.gray}}>Matches loaded: {(matches||[]).length}</div>
       </div>
       <button onClick={()=>go("matches")} style={{background:C.forest,color:C.white,border:"none",borderRadius:10,padding:"10px 20px",fontSize:13,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
         Back to Matches
       </button>
     </div>
   );
-  const round  = null; // ROUNDS lookup removed — use match's own saved fields below
+
+  const round  = null;
   const realHoleData = (() => {
     if(!match.hole_data) return null;
     try {
@@ -1905,24 +1924,22 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   };
   const format = match.format || "Best Ball";
 
-  // ── Build players from tripPlayers (real) or RAW (demo) ──────────────────────
+  // Build players from tripPlayers (real) or RAW (demo)
   const allMatchKeys = [...(match.p1Keys||[]), ...(match.p2Keys||[])];
-
-  // Helper: find a player object by key from tripPlayers or RAW
   const findPlayer = (key) => {
-    const tp = tripPlayers?.find(p=>p.name.toLowerCase()===key);
+    const tp = (tripPlayers||[]).find(p=>p.name.toLowerCase()===key);
     if(tp) return {key, name:tp.name, index:tp.hcp_index||0, team:tp.team||"red"};
     const raw = RAW.find(p=>p.key===key);
     if(raw) return raw;
     return {key, name:key.replace(/\b\w/g,c=>c.toUpperCase()), index:0, team:"red"};
   };
 
-  const rawInMatch = allMatchKeys.map(findPlayer);
-  const builtPlayers = buildPlayers(rawInMatch, course, format);
+  const rawInMatch   = allMatchKeys.map(findPlayer);
+  const builtPlayers = buildPlayers(rawInMatch.length ? rawInMatch : [{key:"p",name:"P",index:0,team:"red"}], course, format);
   const playerByKey  = Object.fromEntries(builtPlayers.map(p=>[p.key, p]));
 
   const p1Players = (match.p1Keys||[]).map(k=>{
-    const tp = tripPlayers?.find(p=>p.name.toLowerCase()===k);
+    const tp = (tripPlayers||[]).find(p=>p.name.toLowerCase()===k);
     if(tp) return {key:k, name:tp.name, index:tp.hcp_index||0, team:tp.team||"red", isExternal:false};
     const raw = RAW.find(p=>p.key===k);
     if(raw) return {...raw, isExternal:false};
@@ -1930,7 +1947,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   });
 
   const p2Players = (match.p2Keys||[]).map(k=>{
-    const tp = tripPlayers?.find(p=>p.name.toLowerCase()===k);
+    const tp = (tripPlayers||[]).find(p=>p.name.toLowerCase()===k);
     if(tp) return {key:k, name:tp.name, index:tp.hcp_index||0, team:tp.team||"blue", isExternal:false};
     const raw = RAW.find(p=>p.key===k);
     if(raw) return {...raw, isExternal:false};
@@ -1939,20 +1956,6 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
 
   const p1ExtPlayers = p1Players.filter(p=>p.isExternal);
   const p2ExtPlayers = p2Players.filter(p=>p.isExternal);
-
-  // ── State seeded from match.holeScores ──────────────────────────────────────
-  const [scoreTab,      setScoreTab]      = useState("Scores");
-  const [locked,        setLocked]        = useState(false);
-  const [confirm,       setConfirm]       = useState(false);
-  const [saved,         setSaved]         = useState(false);
-  const [holeOverrides, setHoleOverrides] = useState({});
-  const [holeScores,    setHoleScores]    = useState(()=>{
-    // Seed from match.holeScores; fill in empty holes for all 18
-    const seed = match.holeScores || {};
-    const out  = {};
-    for(let h=1;h<=18;h++) out[h] = seed[h] ? {...seed[h]} : {};
-    return out;
-  });
 
   // Net score per player per hole:
   // - RAW players (in playerByKey): use pre-built WHS match strokes
