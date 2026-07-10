@@ -2377,7 +2377,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
               ))}
 
               {/* Totals — hidden for scramble since we show team totals not per-player */}
-              {!isScramble&&(
+              {!isScrambleEdit&&(
               <div style={{background:C.mist,borderRadius:10,padding:"10px 12px",marginTop:4}}>
                 <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:6}}>18-Hole Totals</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
