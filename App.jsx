@@ -1873,11 +1873,15 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
              || matches.find(m=>m.status==="completed")
              || matches[0];
   if(!match) return(
-    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:24}}>
-      <div style={{fontSize:14,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
-        Match not found (ID: {matchId||"none"})
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:24,background:C.smoke}}>
+      <div style={{fontSize:13,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",lineHeight:1.6}}>
+        <div style={{fontWeight:700,marginBottom:8}}>Debug Info</div>
+        <div>matchId: {matchId||"null"}</div>
+        <div>matches count: {matches?.length||0}</div>
+        <div>completed: {matches?.filter(m=>m.status==="completed").length||0}</div>
+        <div>match ids: {matches?.slice(0,3).map(m=>m.id?.slice(0,8)).join(", ")}</div>
       </div>
-      <button onClick={()=>go("matches")} style={{background:C.forest,color:C.white,border:"none",borderRadius:10,padding:"10px 20px",fontSize:13,cursor:"pointer"}}>
+      <button onClick={()=>go("matches")} style={{background:C.forest,color:C.white,border:"none",borderRadius:10,padding:"10px 20px",fontSize:13,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
         Back to Matches
       </button>
     </div>
@@ -1901,32 +1905,40 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   };
   const format = match.format || "Best Ball";
 
-  // ── Build players from real tripPlayers first, falling back to RAW demo ──────
+  // ── Build players from tripPlayers (real) or RAW (demo) ──────────────────────
   const allMatchKeys = [...(match.p1Keys||[]), ...(match.p2Keys||[])];
-  const rawInMatch = tripPlayers?.length
-    ? tripPlayers.filter(tp=>allMatchKeys.includes(tp.name.toLowerCase()))
-        .map(tp=>({key:tp.name.toLowerCase(), name:tp.name, index:tp.hcp_index||0, team:tp.team||"red"}))
-    : RAW.filter(p=>allMatchKeys.includes(p.key));
+
+  // Helper: find a player object by key from tripPlayers or RAW
+  const findPlayer = (key) => {
+    const tp = tripPlayers?.find(p=>p.name.toLowerCase()===key);
+    if(tp) return {key, name:tp.name, index:tp.hcp_index||0, team:tp.team||"red"};
+    const raw = RAW.find(p=>p.key===key);
+    if(raw) return raw;
+    return {key, name:key.replace(/\b\w/g,c=>c.toUpperCase()), index:0, team:"red"};
+  };
+
+  const rawInMatch = allMatchKeys.map(findPlayer);
   const builtPlayers = buildPlayers(rawInMatch, course, format);
   const playerByKey  = Object.fromEntries(builtPlayers.map(p=>[p.key, p]));
 
-  // Parse non-RAW partner names — key must be lowercase first name to match holeScores keys
-  // e.g. "John / Tony" with p1Keys:["john"] → Tony gets key "tony" (matches holeScores.tony)
-  const parsePartnerNames = (pairingStr, rawKeys) => {
-    const rawNames = rawKeys.map(k=>RAW.find(p=>p.key===k)?.name||"").filter(Boolean);
-    return pairingStr.split("/").map(n=>n.trim())
-      .filter(n=>n && !rawNames.some(rn=>rn.toLowerCase()===n.toLowerCase()))
-      .map(n=>({key:n.toLowerCase(), name:n, isExternal:true}));
-  };
+  const p1Players = (match.p1Keys||[]).map(k=>{
+    const tp = tripPlayers?.find(p=>p.name.toLowerCase()===k);
+    if(tp) return {key:k, name:tp.name, index:tp.hcp_index||0, team:tp.team||"red", isExternal:false};
+    const raw = RAW.find(p=>p.key===k);
+    if(raw) return {...raw, isExternal:false};
+    return {key:k, name:k.replace(/\b\w/g,c=>c.toUpperCase()), index:0, team:"red", isExternal:true};
+  });
 
-  const p1RawPlayers = (match.p1Keys||[]).map(k=>RAW.find(p=>p.key===k)).filter(Boolean);
-  const p2RawPlayers = (match.p2Keys||[]).map(k=>RAW.find(p=>p.key===k)).filter(Boolean);
-  const p1ExtPlayers = parsePartnerNames(match.p1||"", match.p1Keys||[]);
-  const p2ExtPlayers = parsePartnerNames(match.p2||"", match.p2Keys||[]);
+  const p2Players = (match.p2Keys||[]).map(k=>{
+    const tp = tripPlayers?.find(p=>p.name.toLowerCase()===k);
+    if(tp) return {key:k, name:tp.name, index:tp.hcp_index||0, team:tp.team||"blue", isExternal:false};
+    const raw = RAW.find(p=>p.key===k);
+    if(raw) return {...raw, isExternal:false};
+    return {key:k, name:k.replace(/\b\w/g,c=>c.toUpperCase()), index:0, team:"blue", isExternal:true};
+  });
 
-  // Combined: RAW first (have WHS/net), then external (gross only)
-  const p1Players = [...p1RawPlayers, ...p1ExtPlayers];
-  const p2Players = [...p2RawPlayers, ...p2ExtPlayers];
+  const p1ExtPlayers = p1Players.filter(p=>p.isExternal);
+  const p2ExtPlayers = p2Players.filter(p=>p.isExternal);
 
   // ── State seeded from match.holeScores ──────────────────────────────────────
   const [scoreTab,      setScoreTab]      = useState("Scores");
