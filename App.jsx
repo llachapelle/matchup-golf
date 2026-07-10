@@ -1458,8 +1458,11 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
 
 // ─── MATCHES ──────────────────────────────────────────────────────────────────
 function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userInitials}){
-  const [expandedMatch,  setExpandedMatch]  = useState(null);
-  const [showCompleted,  setShowCompleted]  = useState(false);
+  const [expandedMatch,     setExpandedMatch]     = useState(null);
+  const [showCompleted,     setShowCompleted]     = useState(false);
+  const [collapsedRounds,   setCollapsedRounds]   = useState({});
+
+  const toggleRound = (key) => setCollapsedRounds(p=>({...p,[key]:!p[key]}));
 
   const active   = matches.filter(m=>m.status==="live");
   const upcoming = matches.filter(m=>m.status==="upcoming");
@@ -1475,48 +1478,42 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
     return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
   };
 
-  // Group matches into rounds. If a match has a round_name set, group by that.
-  // Otherwise fall back to date. This lets organizers say "Round 1" and have
-  // all those matches appear together regardless of exact date, while still
-  // working sensibly when no round name is set.
   const groupByRound = (arr) => {
     const byKey = {};
     arr.forEach(m=>{
-      // Use round_name if set, otherwise fall back to date string
       const key = m.round_name ? m.round_name : (m.match_date || "unscheduled");
-      if(!byKey[key]) byKey[key] = {
-        key,
-        label: m.round_name || null,
-        date:  m.match_date || null,
-        matches:[]
-      };
+      if(!byKey[key]) byKey[key] = { key, label: m.round_name || null, date: m.match_date || null, matches:[] };
       byKey[key].matches.push(m);
     });
     return Object.values(byKey).sort((a,b)=>{
-      // Sort by the date of the first match in each group
       const ad = a.matches[0]?.match_date || "9999";
       const bd = b.matches[0]?.match_date || "9999";
       return ad.localeCompare(bd);
     });
   };
 
-  const RoundHeader = ({label, date, matches: roundMatches}) => {
+  const RoundHeader = ({roundKey, label, date, matches: roundMatches, defaultOpen=true}) => {
     const dateLabel = date ? fmtDate(date) : null;
     const isToday = date === today;
-    // Collect unique course names across all matches in this round
     const courses = [...new Set((roundMatches||[]).map(m=>m.course_name).filter(Boolean))];
-    const courseStr = courses.join(" · ");
+    const isCollapsed = collapsedRounds[roundKey] ?? !defaultOpen;
+    const anyLive = (roundMatches||[]).some(m=>m.status==="live");
     return(
-      <div style={{marginBottom:6,marginTop:4}}>
-        <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-          {label
-            ? <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{label}</div>
-            : <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>{dateLabel||"Unscheduled"}</div>
-          }
-          {label&&dateLabel&&<div style={{fontSize:11,color:isToday?C.forest:C.gray,fontFamily:"Arial,sans-serif"}}>{dateLabel}</div>}
+      <button onClick={()=>toggleRound(roundKey)}
+        style={{width:"100%",background:"none",border:"none",padding:"4px 0 8px",cursor:"pointer",
+          display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
+              {label || dateLabel || "Unscheduled"}
+            </div>
+            {label&&dateLabel&&<div style={{fontSize:11,color:isToday?C.forest:C.gray,fontFamily:"Arial,sans-serif"}}>{dateLabel}</div>}
+            {anyLive&&<div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/>}
+          </div>
+          {courses.length>0&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>📍 {courses.join(" · ")}</div>}
         </div>
-        {courseStr&&<div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>📍 {courseStr}</div>}
-      </div>
+        <span style={{fontSize:12,color:C.gray,marginLeft:8,flexShrink:0}}>{isCollapsed?"▼":"▲"}</span>
+      </button>
     );
   };
 
@@ -1527,6 +1524,34 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
     </div>
   );
 
+  const renderRounds = (arr, onTapFn, defaultOpen=true) =>
+    groupByRound(arr).map(round=>{
+      const isCollapsed = collapsedRounds[round.key] ?? !defaultOpen;
+      return(
+        <div key={round.key} style={{marginBottom:4}}>
+          {arr.length > round.matches.length || groupByRound(arr).length > 1 ? (
+            // Only show collapsible header when there are multiple rounds
+            <>
+              <RoundHeader roundKey={round.key} label={round.label} date={round.date}
+                matches={round.matches} defaultOpen={defaultOpen}/>
+              {!isCollapsed && round.matches.map(m=>(
+                <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
+                  showDate={false} expanded={expandedMatch===m.id}
+                  onTap={()=>onTapFn(m)} goMatch={goMatch} go={go}/>
+              ))}
+            </>
+          ) : (
+            // Single round — no collapse header needed
+            round.matches.map(m=>(
+              <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
+                showDate={round.matches.length===1} expanded={expandedMatch===m.id}
+                onTap={()=>onTapFn(m)} goMatch={goMatch} go={go}/>
+            ))
+          )}
+        </div>
+      );
+    });
+
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <Header sub="⛳ MatchUp Golf" title="Matches" detail={activeTrip?.name||"Trip"} onProfile={()=>go("profile")} initials={userInitials}/>
@@ -1534,7 +1559,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
 
         {active.length===0 && upcoming.length===0 && done.length===0 && (
           <div style={{textAlign:"center",padding:"60px 20px",color:C.gray,fontFamily:"Arial,sans-serif",fontSize:14}}>
-            No matches yet — tap + to create one.
+            No matches yet — create one in the Trip tab.
           </div>
         )}
 
@@ -1542,18 +1567,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
         {active.length>0&&(
           <>
             <SectionHeader label="Live Now" count={active.length}/>
-            {groupByRound(active).map(round=>(
-              <div key={`${round.date}__${round.course}`} style={{marginBottom:8}}>
-                {(active.length>1)&&<RoundHeader label={round.label} date={round.date} matches={round.matches}/>}
-                {round.matches.map(m=>(
-                  <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
-                    showDate={active.length===1}
-                    expanded={expandedMatch===m.id}
-                    onTap={()=>goMatch(m.id,"live")}
-                    goMatch={goMatch} go={go}/>
-                ))}
-              </div>
-            ))}
+            {renderRounds(active, m=>goMatch(m.id,"live"), true)}
             <div style={{height:8}}/>
           </>
         )}
@@ -1562,23 +1576,12 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
         {upcoming.length>0&&(
           <>
             <SectionHeader label="Upcoming" count={upcoming.length}/>
-            {groupByRound(upcoming).map(round=>(
-              <div key={`${round.date}__${round.course}`} style={{marginBottom:8}}>
-                <RoundHeader label={round.label} date={round.date} matches={round.matches}/>
-                {round.matches.map(m=>(
-                  <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
-                    showDate={false}
-                    expanded={expandedMatch===m.id}
-                    onTap={()=>goMatch(m.id,"live")}
-                    goMatch={goMatch} go={go}/>
-                ))}
-              </div>
-            ))}
+            {renderRounds(upcoming, m=>goMatch(m.id,"live"), true)}
             <div style={{height:8}}/>
           </>
         )}
 
-        {/* ── COMPLETED — collapsed, grouped by round ── */}
+        {/* ── COMPLETED — collapsed by default, rounds collapsible within ── */}
         {done.length>0&&(
           <>
             <button onClick={()=>setShowCompleted(v=>!v)}
@@ -1592,18 +1595,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
             </button>
             {showCompleted&&(
               <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:4}}>
-                {groupByRound(done).map(round=>(
-                  <div key={`${round.date}__${round.course}`} style={{marginBottom:4}}>
-                    <RoundHeader label={round.label} date={round.date} matches={round.matches}/>
-                    {round.matches.map(m=>(
-                      <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
-                        showDate={false}
-                        expanded={expandedMatch===m.id}
-                        onTap={()=>setExpandedMatch(expandedMatch===m.id?null:m.id)}
-                        goMatch={goMatch} go={go}/>
-                    ))}
-                  </div>
-                ))}
+                {renderRounds(done, m=>setExpandedMatch(expandedMatch===m.id?null:m.id), true)}
               </div>
             )}
           </>
@@ -1722,37 +1714,41 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
             <div style={{fontSize:11,color:C.gray}}>thru {m.thru}</div>
             <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
           </>}
-          {m.status==="completed"&&<>
-            {isScr ? (
-              // Scramble: show winning team clearly with color
-              <div style={{textAlign:"right"}}>
-                {m.winnerSide==="halve" ? (
-                  <div style={{fontSize:12,fontWeight:700,color:C.gray}}>Tied</div>
-                ) : (()=>{
-                  const winTeam = m.winnerSide==="p1"?p1Team:p2Team;
-                  const winColor2 = winTeam==="red"?C.red:C.blue;
-                  const winBg = winTeam==="red"?C.redBg:C.blueBg;
-                  return(
-                    <div style={{background:winBg,borderRadius:8,padding:"4px 8px",textAlign:"center"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif"}}>
-                        {winTeam==="red"?"RED":"BLUE"} WINS
-                      </div>
-                      <div style={{fontSize:10,color:winColor2,fontFamily:"Arial,sans-serif",opacity:.8,marginTop:1}}>
-                        {m.score||""}
-                      </div>
-                    </div>
-                  );
-                })()}
+          {m.status==="completed"&&(()=>{
+            const winSide = m.winnerSide;
+            const winTeam = winSide==="p1"?p1Team:winSide==="p2"?p2Team:null;
+            const winColor2 = winTeam==="red"?C.red:winTeam==="blue"?C.blue:C.gray;
+            const winBg = winTeam==="red"?C.redBg:winTeam==="blue"?C.blueBg:C.mist;
+
+            if(isScr){
+              // Scramble: team badge
+              return winSide==="halve" ? (
+                <div style={{fontSize:12,fontWeight:700,color:C.gray,textAlign:"right"}}>Tied<br/><span style={{fontSize:10,fontWeight:400}}>{m.score||""}</span></div>
+              ) : (
+                <div style={{background:winBg,borderRadius:8,padding:"4px 8px",textAlign:"center"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif"}}>
+                    {winTeam==="red"?"RED":"BLUE"} WINS
+                  </div>
+                  <div style={{fontSize:10,color:winColor2,fontFamily:"Arial,sans-serif",opacity:.8,marginTop:1}}>{m.score||""}</div>
+                </div>
+              );
+            }
+
+            // All other formats: winner name badge
+            return winSide==="halve" ? (
+              <div style={{background:C.mist,borderRadius:8,padding:"4px 8px",textAlign:"center"}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif"}}>TIED</div>
+                <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>{m.score||""}</div>
               </div>
             ) : (
-              <>
-                <div style={{fontSize:13,fontWeight:700,color:C.charcoal,textAlign:"right"}}>{m.score||"—"}</div>
-                <div style={{fontSize:10,color:C.gray,textAlign:"right",marginTop:2}}>
-                  {m.winnerSide==="halve"?"Halved":m.winnerSide==="p1"?`${firstName(m.p1)} wins`:m.winnerSide==="p2"?`${firstName(m.p2)} wins`:""}
+              <div style={{background:winBg,borderRadius:8,padding:"4px 8px",textAlign:"center"}}>
+                <div style={{fontSize:10,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif",textTransform:"uppercase",letterSpacing:.5}}>
+                  {winTeam==="red"?"Red":"Blue"} wins
                 </div>
-              </>
-            )}
-          </>}
+                <div style={{fontSize:11,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif",marginTop:1}}>{m.score||"—"}</div>
+              </div>
+            );
+          })()}
           {m.status==="upcoming"&&(
             <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"6px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Start →</button>
           )}
@@ -1857,9 +1853,10 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
 
 // ─── MATCH EDIT SCREEN ────────────────────────────────────────────────────────
 function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers}){
-  const match  = matches.find(m=>m.id===matchId && m.status==="completed")
-              || matches.find(m=>m.status==="completed")
-              || matches[0];
+  const match = matches.find(m=>m.id===matchId)
+             || matches.find(m=>m.status==="completed")
+             || matches[0];
+  if(!match) return <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#8E8E93",fontFamily:"Arial,sans-serif"}}>Match not found</div>;
   const round  = null; // ROUNDS lookup removed — use match's own saved fields below
   const realHoleData = (() => {
     if(!match.hole_data) return null;
