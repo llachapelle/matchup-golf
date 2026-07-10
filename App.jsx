@@ -1957,22 +1957,25 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   const p1ExtPlayers = p1Players.filter(p=>p.isExternal);
   const p2ExtPlayers = p2Players.filter(p=>p.isExternal);
 
-  // Net score per player per hole:
-  // - RAW players (in playerByKey): use pre-built WHS match strokes
-  // - Guest players (in GUEST_PLAYERS): compute net using their handicap index
-  // - Unknown player: use gross as-is
-  // Returns null if no score entered
+  // p1AllKeys/p2AllKeys must be declared before getNet which references them
+  const p1AllKeys = [
+    ...(match.p1Keys||[]),
+    ...p1ExtPlayers.map(p=>p.key),
+  ];
+  const p2AllKeys = [
+    ...(match.p2Keys||[]),
+    ...p2ExtPlayers.map(p=>p.key),
+  ];
+
+  // Net score per player per hole
   const getNet = (key, h) => {
     const gross = parseInt(holeScores[h]?.[key]);
     if(isNaN(gross) || gross <= 0) return null;
-    // RAW player — pre-built
     const rawP = playerByKey[key];
     if(rawP) return gross - sOnHole(rawP.ms, course.strokeIndex[h-1]);
-    // Guest player with handicap — compute match strokes on the fly
     const guestP = GUEST_PLAYERS[key];
     if(guestP){
       const sideKeys = p1AllKeys.includes(key) ? p1AllKeys : p2AllKeys;
-      // Collect all PHs on this side (RAW + this guest)
       const sidePHs = sideKeys.map(k=>{
         const rp=playerByKey[k];
         if(rp) return rp.ph;
@@ -1989,20 +1992,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
       const guestMS = Math.max(0, guestPH - minPH);
       return gross - sOnHole(guestMS, course.strokeIndex[h-1]);
     }
-    // Unknown external: gross as-is
     return gross;
   };
-
-  // Best score for a side on a hole — uses ALL players in the pairing
-  // p1AllKeys = RAW keys + external keys derived from pairing string
-  const p1AllKeys = [
-    ...(match.p1Keys||[]),
-    ...p1ExtPlayers.map(p=>p.key),
-  ];
-  const p2AllKeys = [
-    ...(match.p2Keys||[]),
-    ...p2ExtPlayers.map(p=>p.key),
-  ];
 
   const bestNetSide = (side, h) => {
     const keys = side==="p1" ? p1AllKeys : p2AllKeys;
