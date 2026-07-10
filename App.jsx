@@ -1773,21 +1773,17 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
                   <div style={{width:55,flexShrink:0,fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>Hole</div>
                   {allHoles.map(h=><div key={h} style={{flex:1,minWidth:18,textAlign:"center",fontSize:9,color:C.gray,fontFamily:"Arial,sans-serif"}}>{h}</div>)}
                 </div>
-                {[...(m.p1Keys||[]),...(m.p2Keys||[])].map((key,ki)=>{
-                  const side = ki<(m.p1Keys||[]).length?"p1":"p2";
-                  const teamColor = side==="p1"?topColor:botColor;
-                  const teamCol2  = resolvePlayerTeam(key,tripPlayers)||(side==="p1"?p1Team:p2Team);
-                  const tc = teamCol2==="red"?C.red:C.blue;
-                  const name = resolvePlayerName(key,tripPlayers);
-                  return(
+                {isScrambleFormat(m) ? (
+                  // Scramble: show two team rows only
+                  [{key:"team_p1",label:p1Team==="red"?"Red":"Blue",tc:p1Team==="red"?C.red:C.blue},
+                   {key:"team_p2",label:p2Team==="red"?"Red":"Blue",tc:p2Team==="red"?C.red:C.blue}].map(({key,label,tc})=>(
                     <div key={key} style={{display:"flex",gap:3,marginBottom:3,alignItems:"center"}}>
-                      <div style={{width:55,flexShrink:0,fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</div>
+                      <div style={{width:55,flexShrink:0,fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif"}}>{label}</div>
                       {allHoles.map(h=>{
                         const gross=parseInt(hs[h]?.[key]);
                         const par=course2.pars[h-1]||4;
                         const rel=!isNaN(gross)?gross-par:null;
                         const bg=rel===null?C.smoke:rel<=-1?C.greenBg:rel===0?C.white:rel===1?C.redBg:"#FDBA74";
-                        const wt2=resolvePlayerTeam(key,tripPlayers)||(side==="p1"?p1Team:p2Team);
                         return(
                           <div key={h} style={{flex:1,minWidth:18,height:20,borderRadius:4,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
                             <span style={{fontSize:9,fontWeight:600,color:rel===null?C.light:C.charcoal,fontFamily:"Arial,sans-serif"}}>{!isNaN(gross)?gross:"·"}</span>
@@ -1795,8 +1791,32 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
                         );
                       })}
                     </div>
-                  );
-                })}
+                  ))
+                ) : (
+                  // All other formats: per-player rows
+                  [...(m.p1Keys||[]),...(m.p2Keys||[])].map((key,ki)=>{
+                    const side = ki<(m.p1Keys||[]).length?"p1":"p2";
+                    const teamCol2 = resolvePlayerTeam(key,tripPlayers)||(side==="p1"?p1Team:p2Team);
+                    const tc = teamCol2==="red"?C.red:C.blue;
+                    const name = resolvePlayerName(key,tripPlayers);
+                    return(
+                      <div key={key} style={{display:"flex",gap:3,marginBottom:3,alignItems:"center"}}>
+                        <div style={{width:55,flexShrink:0,fontSize:10,fontWeight:700,color:tc,fontFamily:"Arial,sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</div>
+                        {allHoles.map(h=>{
+                          const gross=parseInt(hs[h]?.[key]);
+                          const par=course2.pars[h-1]||4;
+                          const rel=!isNaN(gross)?gross-par:null;
+                          const bg=rel===null?C.smoke:rel<=-1?C.greenBg:rel===0?C.white:rel===1?C.redBg:"#FDBA74";
+                          return(
+                            <div key={h} style={{flex:1,minWidth:18,height:20,borderRadius:4,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              <span style={{fontSize:9,fontWeight:600,color:rel===null?C.light:C.charcoal,fontFamily:"Arial,sans-serif"}}>{!isNaN(gross)?gross:"·"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
           </div>
