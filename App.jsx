@@ -2106,8 +2106,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   const resultColor = winTeam==="red"?C.sand:winTeam==="blue"?"#85C1E9":"rgba(255,255,255,.85)";
 
   // Side team colors — derived from actual players, not hardcoded
-  const p1TeamColor = p1RawPlayers.length ? teamColor(p1RawPlayers[0].team) : C.red;
-  const p2TeamColor = p2RawPlayers.length ? teamColor(p2RawPlayers[0].team) : C.blue;
+  const p1TeamColor = p1Players.length ? teamColor(p1Players[0].team) : C.red;
+  const p2TeamColor = p2Players.length ? teamColor(p2Players[0].team) : C.blue;
 
   // ── Save ─────────────────────────────────────────────────────────────────────
   const saveEdit = () => {
