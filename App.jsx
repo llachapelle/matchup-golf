@@ -2127,85 +2127,141 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                     <div style={{width:28,textAlign:"center",fontSize:10,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif"}}>{holes.reduce((s,h)=>s+course.pars[h-1],0)}</div>
                   </div>
 
-                  {/* P1 side label */}
-                  <div style={{fontSize:10,fontWeight:700,color:p1TeamColor,fontFamily:"Arial,sans-serif",letterSpacing:.5,textTransform:"uppercase",marginBottom:4,paddingLeft:2}}>{match.p1}</div>
-                  {p1Players.map(player=>{
-                    const isExt = player.isExternal;
-                    const total = playerTotal(player.key, holes);
-                    return(
-                      <div key={player.key} style={{display:"flex",gap:3,marginBottom:4,alignItems:"center"}}>
-                        <div style={{width:46,fontSize:11,fontWeight:700,color:isExt?C.gray:p1TeamColor,fontFamily:"Arial,sans-serif",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {player.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
-                        </div>
-                        {holes.map(h=>{
-                          const val   = holeScores[h]?.[player.key] ?? "";
-                          const gross = parseInt(val);
-                          const par   = course.pars[h-1];
-                          const net   = getNet(player.key, h); // works for both RAW and ext now
-                          const res   = holeResult(h);
-                          const winning = res==="p1" && net!==null && net===bestNetSide("p1",h);
-                          const bg = !isNaN(gross)&&gross>0
-                            ?(gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg)
-                            :C.smoke;
-                          return(
-                            <div key={h} style={{flex:1,position:"relative"}}>
-                              <input type="number" min="1" max="15" value={val}
-                                onChange={e=>!locked&&setHoleScores(prev=>({...prev,[h]:{...(prev[h]||{}),[player.key]:e.target.value}}))}
-                                disabled={locked}
-                                style={{width:"100%",height:28,border:`1.5px solid ${winning?"#27AE60":C.light}`,borderRadius:5,textAlign:"center",fontSize:11,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:bg,padding:0,boxSizing:"border-box"}}
-                              />
-                              {net!==null&&(
-                                <div style={{textAlign:"center",fontSize:8,color:winning?"#27AE60":isExt?C.gray:p1TeamColor,fontFamily:"Arial,sans-serif",marginTop:1}}>
-                                  {isExt?`g${net}`:`n${net}`}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                        <div style={{width:28,textAlign:"center",fontSize:11,fontWeight:700,color:isExt?C.gray:p1TeamColor,fontFamily:"Arial,sans-serif"}}>{total>0?total:"—"}</div>
+                  {/* P1 side */}
+                  {isScrambleFormat(match) ? (
+                    // Scramble: single team row using team_p1 key
+                    <div style={{display:"flex",gap:3,marginBottom:4,alignItems:"center"}}>
+                      <div style={{width:46,fontSize:11,fontWeight:700,color:p1TeamColor,fontFamily:"Arial,sans-serif",flexShrink:0}}>
+                        {p1TeamColor===C.red?"Red":"Blue"}
                       </div>
-                    );
-                  })}
+                      {holes.map(h=>{
+                        const val = holeScores[h]?.["team_p1"] ?? "";
+                        const gross = parseInt(val);
+                        const par = course.pars[h-1];
+                        const bg = !isNaN(gross)&&gross>0?(gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg):C.smoke;
+                        return(
+                          <div key={h} style={{flex:1}}>
+                            <input type="number" min="1" max="15" value={val}
+                              onChange={e=>!locked&&setHoleScores(prev=>({...prev,[h]:{...(prev[h]||{}),team_p1:e.target.value}}))}
+                              disabled={locked}
+                              style={{width:"100%",height:28,border:`1.5px solid ${C.light}`,borderRadius:5,textAlign:"center",fontSize:11,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:bg,padding:0,boxSizing:"border-box"}}/>
+                          </div>
+                        );
+                      })}
+                      <div style={{width:28,textAlign:"center",fontSize:11,fontWeight:700,color:p1TeamColor,fontFamily:"Arial,sans-serif"}}>
+                        {holes.reduce((s,h)=>{const g=parseInt(holeScores[h]?.["team_p1"]||0);return s+(isNaN(g)?0:g);},0)||"—"}
+                      </div>
+                    </div>
+                  ) : (
+                    // All other formats: per-player rows
+                    <>
+                      <div style={{fontSize:10,fontWeight:700,color:p1TeamColor,fontFamily:"Arial,sans-serif",letterSpacing:.5,textTransform:"uppercase",marginBottom:4,paddingLeft:2}}>{match.p1}</div>
+                      {p1Players.map(player=>{
+                        const isExt = player.isExternal;
+                        const total = playerTotal(player.key, holes);
+                        return(
+                          <div key={player.key} style={{display:"flex",gap:3,marginBottom:4,alignItems:"center"}}>
+                            <div style={{width:46,fontSize:11,fontWeight:700,color:isExt?C.gray:p1TeamColor,fontFamily:"Arial,sans-serif",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              {player.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
+                            </div>
+                            {holes.map(h=>{
+                              const val   = holeScores[h]?.[player.key] ?? "";
+                              const gross = parseInt(val);
+                              const par   = course.pars[h-1];
+                              const net   = getNet(player.key, h);
+                              const res   = holeResult(h);
+                              const winning = res==="p1" && net!==null && net===bestNetSide("p1",h);
+                              const bg = !isNaN(gross)&&gross>0
+                                ?(gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg)
+                                :C.smoke;
+                              return(
+                                <div key={h} style={{flex:1,position:"relative"}}>
+                                  <input type="number" min="1" max="15" value={val}
+                                    onChange={e=>!locked&&setHoleScores(prev=>({...prev,[h]:{...(prev[h]||{}),[player.key]:e.target.value}}))}
+                                    disabled={locked}
+                                    style={{width:"100%",height:28,border:`1.5px solid ${winning?"#27AE60":C.light}`,borderRadius:5,textAlign:"center",fontSize:11,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:bg,padding:0,boxSizing:"border-box"}}
+                                  />
+                                  {net!==null&&(
+                                    <div style={{textAlign:"center",fontSize:8,color:winning?"#27AE60":isExt?C.gray:p1TeamColor,fontFamily:"Arial,sans-serif",marginTop:1}}>
+                                      {isExt?`g${net}`:`n${net}`}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <div style={{width:28,textAlign:"center",fontSize:11,fontWeight:700,color:isExt?C.gray:p1TeamColor,fontFamily:"Arial,sans-serif"}}>{total>0?total:"—"}</div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
 
-                  {/* P2 side label */}
-                  <div style={{fontSize:10,fontWeight:700,color:p2TeamColor,fontFamily:"Arial,sans-serif",letterSpacing:.5,textTransform:"uppercase",marginBottom:4,paddingLeft:2,marginTop:8}}>{match.p2}</div>
-                  {p2Players.map(player=>{
-                    const isExt = player.isExternal;
-                    const total = playerTotal(player.key, holes);
-                    return(
-                      <div key={player.key} style={{display:"flex",gap:3,marginBottom:4,alignItems:"center"}}>
-                        <div style={{width:46,fontSize:11,fontWeight:700,color:isExt?C.gray:p2TeamColor,fontFamily:"Arial,sans-serif",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {player.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
-                        </div>
-                        {holes.map(h=>{
-                          const val   = holeScores[h]?.[player.key] ?? "";
-                          const gross = parseInt(val);
-                          const par   = course.pars[h-1];
-                          const net   = getNet(player.key, h);
-                          const res   = holeResult(h);
-                          const winning = res==="p2" && net!==null && net===bestNetSide("p2",h);
-                          const bg = !isNaN(gross)&&gross>0
-                            ?(gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg)
-                            :C.smoke;
-                          return(
-                            <div key={h} style={{flex:1,position:"relative"}}>
-                              <input type="number" min="1" max="15" value={val}
-                                onChange={e=>!locked&&setHoleScores(prev=>({...prev,[h]:{...(prev[h]||{}),[player.key]:e.target.value}}))}
-                                disabled={locked}
-                                style={{width:"100%",height:28,border:`1.5px solid ${winning?"#27AE60":C.light}`,borderRadius:5,textAlign:"center",fontSize:11,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:bg,padding:0,boxSizing:"border-box"}}
-                              />
-                              {net!==null&&(
-                                <div style={{textAlign:"center",fontSize:8,color:winning?"#27AE60":isExt?C.gray:p2TeamColor,fontFamily:"Arial,sans-serif",marginTop:1}}>
-                                  {isExt?`g${net}`:`n${net}`}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                        <div style={{width:28,textAlign:"center",fontSize:11,fontWeight:700,color:isExt?C.gray:p2TeamColor,fontFamily:"Arial,sans-serif"}}>{total>0?total:"—"}</div>
+                  {/* P2 side */}
+                  {isScrambleFormat(match) ? (
+                    <div style={{display:"flex",gap:3,marginBottom:4,alignItems:"center",marginTop:8}}>
+                      <div style={{width:46,fontSize:11,fontWeight:700,color:p2TeamColor,fontFamily:"Arial,sans-serif",flexShrink:0}}>
+                        {p2TeamColor===C.red?"Red":"Blue"}
                       </div>
-                    );
-                  })}
+                      {holes.map(h=>{
+                        const val = holeScores[h]?.["team_p2"] ?? "";
+                        const gross = parseInt(val);
+                        const par = course.pars[h-1];
+                        const bg = !isNaN(gross)&&gross>0?(gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg):C.smoke;
+                        return(
+                          <div key={h} style={{flex:1}}>
+                            <input type="number" min="1" max="15" value={val}
+                              onChange={e=>!locked&&setHoleScores(prev=>({...prev,[h]:{...(prev[h]||{}),team_p2:e.target.value}}))}
+                              disabled={locked}
+                              style={{width:"100%",height:28,border:`1.5px solid ${C.light}`,borderRadius:5,textAlign:"center",fontSize:11,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:bg,padding:0,boxSizing:"border-box"}}/>
+                          </div>
+                        );
+                      })}
+                      <div style={{width:28,textAlign:"center",fontSize:11,fontWeight:700,color:p2TeamColor,fontFamily:"Arial,sans-serif"}}>
+                        {holes.reduce((s,h)=>{const g=parseInt(holeScores[h]?.["team_p2"]||0);return s+(isNaN(g)?0:g);},0)||"—"}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{fontSize:10,fontWeight:700,color:p2TeamColor,fontFamily:"Arial,sans-serif",letterSpacing:.5,textTransform:"uppercase",marginBottom:4,paddingLeft:2,marginTop:8}}>{match.p2}</div>
+                      {p2Players.map(player=>{
+                        const isExt = player.isExternal;
+                        const total = playerTotal(player.key, holes);
+                        return(
+                          <div key={player.key} style={{display:"flex",gap:3,marginBottom:4,alignItems:"center"}}>
+                            <div style={{width:46,fontSize:11,fontWeight:700,color:isExt?C.gray:p2TeamColor,fontFamily:"Arial,sans-serif",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              {player.name}{isExt&&<span style={{fontSize:8,color:C.gray}}> *</span>}
+                            </div>
+                            {holes.map(h=>{
+                              const val   = holeScores[h]?.[player.key] ?? "";
+                              const gross = parseInt(val);
+                              const par   = course.pars[h-1];
+                              const net   = getNet(player.key, h);
+                              const res   = holeResult(h);
+                              const winning = res==="p2" && net!==null && net===bestNetSide("p2",h);
+                              const bg = !isNaN(gross)&&gross>0
+                                ?(gross<par?C.greenBg:gross===par?C.white:gross===par+1?C.amberBg:C.redBg)
+                                :C.smoke;
+                              return(
+                                <div key={h} style={{flex:1,position:"relative"}}>
+                                  <input type="number" min="1" max="15" value={val}
+                                    onChange={e=>!locked&&setHoleScores(prev=>({...prev,[h]:{...(prev[h]||{}),[player.key]:e.target.value}}))}
+                                    disabled={locked}
+                                    style={{width:"100%",height:28,border:`1.5px solid ${winning?"#27AE60":C.light}`,borderRadius:5,textAlign:"center",fontSize:11,fontWeight:700,color:C.charcoal,outline:"none",fontFamily:"Arial,sans-serif",background:bg,padding:0,boxSizing:"border-box"}}
+                                  />
+                                  {net!==null&&(
+                                    <div style={{textAlign:"center",fontSize:8,color:winning?"#27AE60":isExt?C.gray:p2TeamColor,fontFamily:"Arial,sans-serif",marginTop:1}}>
+                                      {isExt?`g${net}`:`n${net}`}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <div style={{width:28,textAlign:"center",fontSize:11,fontWeight:700,color:isExt?C.gray:p2TeamColor,fontFamily:"Arial,sans-serif"}}>{total>0?total:"—"}</div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
 
                   {/* Hole result row */}
                   <div style={{display:"flex",gap:3,marginTop:6,alignItems:"center"}}>
@@ -2440,6 +2496,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   const [expandScorecard, setExpandScorecard] = useState(true);
   const [expandHcp,    setExpandHcp]    = useState(null);
   const [showSummary,  setShowSummary]  = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showNet,      setShowNet]      = useState(false); // toggle gross/net view
 
   // Seed hole scores and results from match.holeScores
@@ -3140,21 +3197,32 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
               style={{background:"rgba(255,255,255,.15)",border:"none",color:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:700}}>
               Edit
             </button>
-            <button onClick={async ()=>{
-              // Wipe hole scores from DB
-              try { await db.delete("hole_scores",`match_id=eq.${match.id}`); } catch(e){}
-              // Reset match row
-              await db.patch("matches",`id=eq.${match.id}`,{
-                status:"upcoming", thru:0, live_score:null,
-                score_data:null, banked_scores:null, winner_side:null, score:null
-              });
-              // Reset local state
-              setHoleScores({}); setHoleResults({}); setHoleNum(holeStart);
-              setShowSummary(false);
-            }}
-              style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.7)",borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:600}}>
-              Clear
-            </button>
+            {!showClearConfirm ? (
+              <button onClick={()=>setShowClearConfirm(true)}
+                style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.3)",color:"rgba(255,255,255,.7)",borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:600}}>
+                Clear
+              </button>
+            ) : (
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                <span style={{fontSize:10,color:"rgba(255,255,255,.8)",fontFamily:"Arial,sans-serif"}}>Clear all scores?</span>
+                <button onClick={async ()=>{
+                  try { await db.delete("hole_scores",`match_id=eq.${match.id}`); } catch(e){}
+                  await db.patch("matches",`id=eq.${match.id}`,{
+                    status:"upcoming", thru:0, live_score:null,
+                    score_data:null, banked_scores:null, winner_side:null, score:null
+                  });
+                  setHoleScores({}); setHoleResults({}); setHoleNum(holeStart);
+                  setShowSummary(false); setShowClearConfirm(false);
+                }}
+                  style={{background:C.red,border:"none",color:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:700}}>
+                  Yes
+                </button>
+                <button onClick={()=>setShowClearConfirm(false)}
+                  style={{background:"rgba(255,255,255,.15)",border:"none",color:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:600}}>
+                  No
+                </button>
+              </div>
+            )}
           </div>
         </div>
           <div style={{color:"rgba(255,255,255,.65)",fontSize:11,fontFamily:"Arial,sans-serif",marginBottom:3}}>
