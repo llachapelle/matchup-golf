@@ -1745,7 +1745,21 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
                   <div style={{fontSize:11,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif"}}>
                     {winTeam==="red"?"RED":"BLUE"} WINS
                   </div>
-                  <div style={{fontSize:10,color:winColor2,fontFamily:"Arial,sans-serif",opacity:.8,marginTop:1}}>{m.score||""}</div>
+                  <div style={{fontSize:10,color:winColor2,fontFamily:"Arial,sans-serif",opacity:.8,marginTop:1}}>{(()=>{
+                    const s=m.score||"";
+                    // Already score-to-par format
+                    if(!s||s.includes("E")||s.includes("+")||s.match(/\([-\d]/)) return s;
+                    // Old raw format "72 vs 74" — recompute from holeScores
+                    const hs=m.holeScores||{};
+                    const pars=(()=>{try{const hd=typeof m.hole_data==="string"?JSON.parse(m.hole_data):m.hole_data;if(Array.isArray(hd)&&hd.length===18)return hd.map(h=>h.par);}catch(e){}return[4,5,4,3,5,4,3,4,4,4,5,4,3,4,5,4,3,5];})();
+                    const totalPar=pars.reduce((a,b)=>a+b,0);
+                    let t1=0,t2=0;
+                    for(let h=1;h<=18;h++){const a=parseInt((hs[h]||{})["team_p1"]),b=parseInt((hs[h]||{})["team_p2"]);if(!isNaN(a)&&a>0)t1+=a;if(!isNaN(b)&&b>0)t2+=b;}
+                    if(!t1&&!t2) return s;
+                    const fmt=r=>r===0?"E":r>0?`+${r}`:`${r}`;
+                    const r1=t1-totalPar,r2=t2-totalPar;
+                    return winTeam===p1Team?`${fmt(r1)} vs ${fmt(r2)}`:`${fmt(r2)} vs ${fmt(r1)}`;
+                  })()}</div>
                 </div>
               );
             }
@@ -2039,12 +2053,32 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   // Compute proper match play result — only from holes with scores
   // Returns the result as the match would stand at that point
   const computeMatchScore = () => {
-    // For a COMPLETED match, the result was already locked in and saved the
-    // moment the match finished (see finishMatch / the "decidedAt" freeze
-    // logic in LiveMatchScreen). Re-deriving it here from current hole data
-    // is exactly what caused completed matches to show a different, wrong
-    // result on revisit (e.g. "1&0" instead of the real "2&1") — so for any
-    // completed match we simply trust what was saved, never recompute.
+    // For scramble: always recompute from hole scores so we show score-to-par
+    if(isScrambleEdit){
+      let t1=0,t2=0,h1=0,h2=0;
+      for(let h=1;h<=18;h++){
+        const hs=holeScores[h]||{};
+        const s1=parseInt(hs["team_p1"]),s2=parseInt(hs["team_p2"]);
+        if(!isNaN(s1)&&s1>0){t1+=s1;h1++;}
+        if(!isNaN(s2)&&s2>0){t2+=s2;h2++;}
+      }
+      // If no scores entered yet, fall back to saved result
+      if(h1===0&&h2===0) return {winnerSide:match.winnerSide, text:match.score||"—"};
+      const totalPar = course.pars.reduce((s,p)=>s+p,0);
+      const rel1=t1-totalPar, rel2=t2-totalPar;
+      const fmtRel=r=>r===0?"E":r>0?`+${r}`:`${r}`;
+      const p1Lbl=p1TeamColor===C.red?"Red":"Blue";
+      const p2Lbl=p2TeamColor===C.red?"Red":"Blue";
+      if(h1===18&&h2===18){
+        if(t1<t2) return {winnerSide:"p1", text:`${p1Lbl} wins (${fmtRel(rel1)} vs ${fmtRel(rel2)})`};
+        if(t2<t1) return {winnerSide:"p2", text:`${p2Lbl} wins (${fmtRel(rel2)} vs ${fmtRel(rel1)})`};
+        return {winnerSide:"halve", text:`Tied (${fmtRel(rel1)})`};
+      }
+      return {winnerSide:t1<t2?"p1":t2<t1?"p2":"halve",
+        text:`${p1Lbl}: ${h1>0?fmtRel(rel1):"—"} · ${p2Lbl}: ${h2>0?fmtRel(rel2):"—"} thru ${Math.max(h1,h2)}`};
+    }
+
+    // For completed non-scramble matches: trust the saved score
     if(match.status==="completed" && match.score){
       return {winnerSide: match.winnerSide, text: match.score};
     }
