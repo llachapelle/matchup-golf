@@ -2016,6 +2016,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   };
 
   const isScrambleEdit = isScrambleFormat(match);
+  const isXBallEdit    = isXBallFormat(match);
+  const xBallTargetEdit = format.toLowerCase().includes("40") ? 40 : 20;
 
   // Derive hole winner live from gross scores + WHS — null if no scores entered for that hole
   const derivedHoleResults = Object.fromEntries(
@@ -2067,8 +2069,10 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
       const totalPar = course.pars.reduce((s,p)=>s+p,0);
       const rel1=t1-totalPar, rel2=t2-totalPar;
       const fmtRel=r=>r===0?"E":r>0?`+${r}`:`${r}`;
-      const p1Lbl=p1TeamColor===C.red?"Red":"Blue";
-      const p2Lbl=p2TeamColor===C.red?"Red":"Blue";
+      const p1Team2 = p1Players[0]?.team||"red";
+      const p2Team2 = p2Players[0]?.team||"blue";
+      const p1Lbl=p1Team2==="red"?"Red":"Blue";
+      const p2Lbl=p2Team2==="red"?"Red":"Blue";
       if(h1===18&&h2===18){
         if(t1<t2) return {winnerSide:"p1", text:`${p1Lbl} wins (${fmtRel(rel1)} vs ${fmtRel(rel2)})`};
         if(t2<t1) return {winnerSide:"p2", text:`${p2Lbl} wins (${fmtRel(rel2)} vs ${fmtRel(rel1)})`};
@@ -2212,10 +2216,14 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
         <div style={card()}>
           <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:8}}>Hole-by-Hole Scorecard</div>
           <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>
-            {scoreTab==="Scores"
+            {isXBallEdit
+              ? `Enter gross scores. Each player must bank ${xBallTargetEdit} scores. Banked scores counted toward team total.`
+              : scoreTab==="Scores"
               ? "Enter gross scores — net scores (WHS) auto-determine hole winners. Result updates live."
               : "Hole winners derived from scores. Tap to override manually."}
           </div>
+          {/* Only show Scores/Winners tabs for match-play formats */}
+          {!isXBallEdit&&(
           <div style={{display:"flex",gap:6,marginBottom:14}}>
             {["Scores","Winners"].map(t=>(
               <button key={t} onClick={()=>setScoreTab(t)}
@@ -2226,10 +2234,37 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
               </button>
             ))}
           </div>
+          )}
 
           {/* ── SCORES TAB ── */}
-          {scoreTab==="Scores"&&(
+          {(scoreTab==="Scores"||isXBallEdit)&&(
             <>
+              {/* XBall: show banked status per player */}
+              {isXBallEdit&&(
+                <div style={{marginBottom:12,background:C.mist,borderRadius:10,padding:"10px 12px"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:8}}>
+                    Banked Status · Target: {xBallTargetEdit} per player
+                  </div>
+                  {[...p1Players,...p2Players].map((player,pi)=>{
+                    const tc = pi<p1Players.length?p1TeamColor:p2TeamColor;
+                    // Count banked holes from holeScores
+                    let banked=0;
+                    for(let h=1;h<=18;h++){
+                      const v=parseInt(holeScores[h]?.[player.key]);
+                      if(!isNaN(v)&&v>0) banked++;
+                    }
+                    const done = banked>=xBallTargetEdit;
+                    return(
+                      <div key={player.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:`1px solid ${C.light}`}}>
+                        <div style={{fontSize:12,fontWeight:600,color:tc,fontFamily:"Arial,sans-serif"}}>{player.name}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:done?C.green:C.amber,fontFamily:"Arial,sans-serif"}}>
+                          {banked}/{xBallTargetEdit} {done?"✓":""}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {[
                 {label:"Front 9", holes:Array.from({length:9},(_,i)=>i+1)},
                 {label:"Back 9",  holes:Array.from({length:9},(_,i)=>i+10)},
@@ -2387,7 +2422,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                     </>
                   )}
 
-                  {/* Hole result row */}
+                  {/* Hole result row — match play only */}
+                  {!isScrambleEdit&&!isXBallEdit&&(
                   <div style={{display:"flex",gap:3,marginTop:6,alignItems:"center"}}>
                     <div style={{width:46,fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",flexShrink:0}}>Result</div>
                     {holes.map(h=>{
@@ -2407,6 +2443,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                     })}
                     <div style={{width:28}}/>
                   </div>
+                  )}
                 </div>
               ))}
 
@@ -2438,7 +2475,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
           )}
 
           {/* ── WINNERS TAB ── */}
-          {scoreTab==="Winners"&&(
+          {scoreTab==="Winners"&&!isXBallEdit&&(
             <>
               <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
                 {Array.from({length:18},(_,i)=>i+1).map(h=>{
