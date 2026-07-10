@@ -2128,7 +2128,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
     holes.reduce((s,h)=>{ const v=parseInt(holeScores[h]?.[key]); return s+(isNaN(v)?0:v); }, 0);
 
   // ── Render ──────────────────────────────────────────────────────────────────
-  return(
+  try { return(
     <div style={{flex:1,display:"flex",flexDirection:"column",background:C.smoke}}>
       <div style={{background:`linear-gradient(135deg,${C.forest},${C.fairway})`,padding:"14px 20px 18px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -2480,7 +2480,21 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
       </div>
     </div>
   );
+  } catch(err) {
+    return(
+      <div style={{flex:1,padding:24,background:C.smoke,display:"flex",flexDirection:"column",gap:12,alignItems:"center",justifyContent:"center"}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.red}}>Render Error</div>
+        <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center",wordBreak:"break-all"}}>
+          {err?.message||String(err)}
+        </div>
+        <button onClick={()=>go("matches")} style={{background:C.forest,color:C.white,border:"none",borderRadius:10,padding:"10px 20px",fontSize:13,cursor:"pointer",fontFamily:"Arial,sans-serif"}}>
+          Back to Matches
+        </button>
+      </div>
+    );
+  }
 }
+
 
 
 // ─── LIVE MATCH ───────────────────────────────────────────────────────────────
