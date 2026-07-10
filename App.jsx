@@ -1524,16 +1524,33 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
     </div>
   );
 
-  const renderRounds = (arr, onTapFn, defaultOpen=true) =>
+  const renderRounds = (arr, onTapFn, defaultOpen=true, section="") =>
     groupByRound(arr).map(round=>{
-      const isCollapsed = collapsedRounds[round.key] ?? !defaultOpen;
+      const sectionKey = `${section}__${round.key}`;
+      const isCollapsed = collapsedRounds[sectionKey] ?? !defaultOpen;
       return(
-        <div key={round.key} style={{marginBottom:4}}>
-          {arr.length > round.matches.length || groupByRound(arr).length > 1 ? (
-            // Only show collapsible header when there are multiple rounds
+        <div key={sectionKey} style={{marginBottom:4}}>
+          {groupByRound(arr).length > 1 ? (
             <>
-              <RoundHeader roundKey={round.key} label={round.label} date={round.date}
-                matches={round.matches} defaultOpen={defaultOpen}/>
+              <button onClick={()=>setCollapsedRounds(p=>({...p,[sectionKey]:!p[sectionKey]}))}
+                style={{width:"100%",background:"none",border:"none",padding:"4px 0 8px",cursor:"pointer",
+                  display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.charcoal,fontFamily:"Arial,sans-serif"}}>
+                      {round.label || (round.date ? fmtDate(round.date) : "Unscheduled")}
+                    </div>
+                    {round.label&&round.date&&<div style={{fontSize:11,color:round.date===today?C.forest:C.gray,fontFamily:"Arial,sans-serif"}}>{fmtDate(round.date)}</div>}
+                    {round.matches.some(m=>m.status==="live")&&<div style={{width:6,height:6,borderRadius:"50%",background:C.green}}/>}
+                  </div>
+                  {[...new Set(round.matches.map(m=>m.course_name).filter(Boolean))].length>0&&(
+                    <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>
+                      📍 {[...new Set(round.matches.map(m=>m.course_name).filter(Boolean))].join(" · ")}
+                    </div>
+                  )}
+                </div>
+                <span style={{fontSize:12,color:C.gray,marginLeft:8,flexShrink:0}}>{isCollapsed?"▼":"▲"}</span>
+              </button>
               {!isCollapsed && round.matches.map(m=>(
                 <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
                   showDate={false} expanded={expandedMatch===m.id}
@@ -1541,7 +1558,6 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
               ))}
             </>
           ) : (
-            // Single round — no collapse header needed
             round.matches.map(m=>(
               <MatchCard key={m.id} m={m} tripPlayers={tripPlayers} fmtDate={fmtDate}
                 showDate={round.matches.length===1} expanded={expandedMatch===m.id}
@@ -1567,7 +1583,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
         {active.length>0&&(
           <>
             <SectionHeader label="Live Now" count={active.length}/>
-            {renderRounds(active, m=>goMatch(m.id,"live"), true)}
+            {renderRounds(active, m=>goMatch(m.id,"live"), true, "live")}
             <div style={{height:8}}/>
           </>
         )}
@@ -1576,7 +1592,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
         {upcoming.length>0&&(
           <>
             <SectionHeader label="Upcoming" count={upcoming.length}/>
-            {renderRounds(upcoming, m=>goMatch(m.id,"live"), true)}
+            {renderRounds(upcoming, m=>goMatch(m.id,"live"), true, "upcoming")}
             <div style={{height:8}}/>
           </>
         )}
@@ -1595,7 +1611,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
             </button>
             {showCompleted&&(
               <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:4}}>
-                {renderRounds(done, m=>setExpandedMatch(expandedMatch===m.id?null:m.id), true)}
+                {renderRounds(done, m=>setExpandedMatch(expandedMatch===m.id?null:m.id), true, "done")}
               </div>
             )}
           </>
@@ -1856,7 +1872,16 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   const match = matches.find(m=>m.id===matchId)
              || matches.find(m=>m.status==="completed")
              || matches[0];
-  if(!match) return <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#8E8E93",fontFamily:"Arial,sans-serif"}}>Match not found</div>;
+  if(!match) return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:24}}>
+      <div style={{fontSize:14,color:C.gray,fontFamily:"Arial,sans-serif",textAlign:"center"}}>
+        Match not found (ID: {matchId||"none"})
+      </div>
+      <button onClick={()=>go("matches")} style={{background:C.forest,color:C.white,border:"none",borderRadius:10,padding:"10px 20px",fontSize:13,cursor:"pointer"}}>
+        Back to Matches
+      </button>
+    </div>
+  );
   const round  = null; // ROUNDS lookup removed — use match's own saved fields below
   const realHoleData = (() => {
     if(!match.hole_data) return null;
@@ -6879,7 +6904,8 @@ export default function App(){
       const m = matches.find(m=>m.id===matchId);
       setEditMatch(m || null);
     }
-    setScreen(dest);
+    // Use setTimeout(0) to ensure selectedMatchId state is committed before screen changes
+    setTimeout(()=>setScreen(dest), 0);
   };
 
   const loadTrip = useCallback(async (trip) => {
@@ -7369,7 +7395,7 @@ export default function App(){
             {screen==="intent"      &&<NoTripScreen       onCreateTrip={()=>setScreen("setup")} onJoinTrip={()=>setScreen("join")}/>}
             {screen==="setup"       &&<TripSetupScreen    go={setScreen} session={session} onTripCreated={handleTripCreated}/>}
             {screen==="profile"     &&<ProfileScreen      go={setScreen} goBack={goBack} onSignOut={handleSignOut} session={session} tripPlayers={tripPlayers} activeTrip={activeTrip} lifetimeStats={lifetimeStats} {...matchProps}/>}
-            {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} goBack={goBack} matchId={selectedMatchId} {...matchProps}/>}
+            {screen==="matchedit"   &&<MatchEditScreen    go={setScreen} goBack={goBack} matchId={selectedMatchId} matches={matches} updateMatch={updateMatch} tripPlayers={tripPlayers}/>}
             {screen==="payouts"     &&<PayoutsScreen      go={setScreen} goBack={goBack} tripPlayers={tripPlayers} activeTrip={activeTrip} sideGames={sideGames} onEditGame={g=>setEditSideGame(g)} {...matchProps}/>}
             {screen==="sidegamesetup" &&<SideGameSetupScreen go={setScreen} goBack={goBack} activeTrip={activeTrip} tripPlayers={tripPlayers} matches={matches} editGame={editSideGame} prefillRound={prefillRound}
               onGameCreated={g=>{setSideGames(prev=>[...prev,g]);setPrefillRound(null);}}
