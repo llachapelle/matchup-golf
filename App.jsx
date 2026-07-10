@@ -1945,12 +1945,26 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
     return nets.length ? Math.min(...nets) : null;
   };
 
+  const isScrambleEdit = isScrambleFormat(match);
+
   // Derive hole winner live from gross scores + WHS — null if no scores entered for that hole
   const derivedHoleResults = Object.fromEntries(
     Array.from({length:18},(_,i)=>i+1).map(h=>{
+      if(isScrambleEdit){
+        // Scramble: lower team gross score wins the hole
+        const hs = holeScores[h]||{};
+        const s1 = parseInt(hs["team_p1"]), s2 = parseInt(hs["team_p2"]);
+        const has1 = !isNaN(s1)&&s1>0, has2 = !isNaN(s2)&&s2>0;
+        if(!has1&&!has2) return [h, null];
+        if(!has1) return [h,"p2"];
+        if(!has2) return [h,"p1"];
+        if(s1<s2) return [h,"p1"];
+        if(s2<s1) return [h,"p2"];
+        return [h,"tie"];
+      }
       const n1 = bestNetSide("p1", h);
       const n2 = bestNetSide("p2", h);
-      if(n1===null && n2===null) return [h, null];   // no scores yet
+      if(n1===null && n2===null) return [h, null];
       if(n1===null) return [h,"p2"];
       if(n2===null) return [h,"p1"];
       if(n1 < n2)  return [h,"p1"];
@@ -2306,7 +2320,8 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                 </div>
               ))}
 
-              {/* Totals */}
+              {/* Totals — hidden for scramble since we show team totals not per-player */}
+              {!isScramble&&(
               <div style={{background:C.mist,borderRadius:10,padding:"10px 12px",marginTop:4}}>
                 <div style={{fontSize:11,fontWeight:700,color:C.slate,fontFamily:"Arial,sans-serif",marginBottom:6}}>18-Hole Totals</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -2324,6 +2339,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                   })}
                 </div>
               </div>
+              )}
               <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:6,background:C.mist,borderRadius:8,padding:"7px 10px"}}>
                 Color: <span style={{color:C.green,fontWeight:700}}>eagle/birdie</span> · even · <span style={{color:C.amber,fontWeight:700}}>bogey</span> · <span style={{color:C.red,fontWeight:700}}>double+</span> · Green border = hole winner net score<br/>
                 * Guest players — gross scores only, not used for net calculation
@@ -2749,24 +2765,38 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     const p1Col=p1Team==="red"?C.sand:"#85C1E9";
     const p2Col=p2Team==="red"?C.sand:"#85C1E9";
 
-    // X-Ball (20/40 Ball): show banked progress and net totals per side
+    // X-Ball (20/40 Ball): lower net total wins; auto-loss if banked count not met
     if(isXBall){
       const p1Keys=[...(match.p1Keys||[]),...p1ExtPlayers.map(p=>p.key)];
       const p2Keys=[...(match.p2Keys||[]),...p2ExtPlayers.map(p=>p.key)];
       const p1Banked=bankedCountForSide(p1Keys), p2Banked=bankedCountForSide(p2Keys);
       const p1Net=bankedNetTotalForSide(p1Keys), p2Net=bankedNetTotalForSide(p2Keys);
       if(p1Banked===0&&p2Banked===0) return {text:"Not started", color:"rgba(255,255,255,.8)"};
-      if(p1Banked>=xBallTarget&&p2Banked>=xBallTarget){
+
+      const p1Done = p1Banked>=xBallTarget;
+      const p2Done = p2Banked>=xBallTarget;
+
+      if(p1Done&&p2Done){
+        // Both met target — lower net total wins
         if(p1Net<p2Net) return {text:`${match.p1} wins (${p1Net} vs ${p2Net})`, color:p1Col};
         if(p2Net<p1Net) return {text:`${match.p2} wins (${p2Net} vs ${p1Net})`, color:p2Col};
         return {text:`Tied (${p1Net} each)`, color:"rgba(255,255,255,.8)"};
       }
+      // If round is over (all holes played) and one side didn't bank enough — auto-loss
+      const holesPlayed = Array.from({length:totalHoles},(_,i)=>holeStart+i)
+        .filter(h=>p1Keys.some(k=>parseInt((holeScores[h]||{})[k])>0)||p2Keys.some(k=>parseInt((holeScores[h]||{})[k])>0)).length;
+      if(holesPlayed>=totalHoles){
+        if(!p1Done&&p2Done) return {text:`${match.p2} wins (${match.p1.split(" / ")[0]} short ${xBallTarget-p1Banked})`, color:p2Col};
+        if(!p2Done&&p1Done) return {text:`${match.p1} wins (${match.p2.split(" / ")[0]} short ${xBallTarget-p2Banked})`, color:p1Col};
+        if(!p1Done&&!p2Done) return {text:`Both teams short — no winner`, color:"rgba(255,255,255,.8)"};
+      }
       return {text:`${match.p1.split(" / ")[0]}: ${p1Banked}/${xBallTarget} · ${match.p2.split(" / ")[0]}: ${p2Banked}/${xBallTarget}`, color:"rgba(255,255,255,.85)"};
     }
 
-    // Scramble: stroke play — show running totals
+    // Scramble: stroke play — lower score wins, show score-to-par
     if(isScramble){
       let t1=0,t2=0,h1=0,h2=0;
+      const par = course.pars || [];
       for(let h=holeStart;h<=holeEnd;h++){
         const hs=holeScores[h]||{};
         const s1=parseInt(hs["team_p1"]), s2=parseInt(hs["team_p2"]);
@@ -2774,13 +2804,26 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
         if(!isNaN(s2)&&s2>0){t2+=s2;h2++;}
       }
       if(h1===0&&h2===0) return {text:"Not started", color:"rgba(255,255,255,.8)"};
-      const thruStr = h1>0&&h2>0&&h1===h2?`thru ${h1}`:h1>0||h2>0?`(${match.p1.split(" / ")[0]}: thru ${h1}, ${match.p2.split(" / ")[0]}: thru ${h2})`:"";
+
+      // Score to par for holes played so far
+      const parSoFar1 = Array.from({length:h1},(_,i)=>holeStart+i).reduce((s,h)=>s+(par[h-1]||4),0);
+      const parSoFar2 = Array.from({length:h2},(_,i)=>holeStart+i).reduce((s,h)=>s+(par[h-1]||4),0);
+      const rel1 = t1 - parSoFar1;
+      const rel2 = t2 - parSoFar2;
+      const fmtRel = r => r===0?"E":r>0?`+${r}`:`${r}`;
+
+      // Team labels (Red/Blue)
+      const p1Label = p1Team==="red"?"Red":"Blue";
+      const p2Label = p2Team==="red"?"Red":"Blue";
+
       if(h1===totalHoles&&h2===totalHoles){
-        if(t1<t2) return {text:`${match.p1} wins (${t1} vs ${t2})`, color:p1Col};
-        if(t2<t1) return {text:`${match.p2} wins (${t2} vs ${t1})`, color:p2Col};
-        return {text:`Tied (${t1} each)`, color:"rgba(255,255,255,.8)"};
+        // Lower score wins
+        if(t1<t2) return {text:`${p1Label} wins (${fmtRel(rel1)} vs ${fmtRel(rel2)})`, color:p1Col};
+        if(t2<t1) return {text:`${p2Label} wins (${fmtRel(rel2)} vs ${fmtRel(rel1)})`, color:p2Col};
+        return {text:`Tied (${fmtRel(rel1)})`, color:"rgba(255,255,255,.8)"};
       }
-      return {text:`${match.p1}: ${t1||"—"} · ${match.p2}: ${t2||"—"} ${thruStr}`, color:"rgba(255,255,255,.85)"};
+      const thru = Math.max(h1, h2);
+      return {text:`${p1Label}: ${h1>0?fmtRel(rel1):"—"} · ${p2Label}: ${h2>0?fmtRel(rel2):"—"} · thru ${thru}`, color:"rgba(255,255,255,.85)"};
     }
 
     // Match play
@@ -3148,20 +3191,31 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
             if(isXBall){
               const p1Keys=[...(match.p1Keys||[]),...p1ExtPlayers.map(p=>p.key)];
               const p2Keys=[...(match.p2Keys||[]),...p2ExtPlayers.map(p=>p.key)];
+              const p1Banked=bankedCountForSide(p1Keys), p2Banked=bankedCountForSide(p2Keys);
               const p1Net=bankedNetTotalForSide(p1Keys), p2Net=bankedNetTotalForSide(p2Keys);
-              ws=p1Net<p2Net?"p1":p2Net<p1Net?"p2":"halve";
-              scoreStr=ws==="halve"?`Tied (${p1Net})`:`${ws==="p1"?match.p1:match.p2} wins (${Math.min(p1Net,p2Net)} vs ${Math.max(p1Net,p2Net)})`;
+              const p1Done=p1Banked>=xBallTarget, p2Done=p2Banked>=xBallTarget;
+              if(!p1Done&&p2Done){ ws="p2"; scoreStr=`${match.p2} wins (${match.p1.split(" / ")[0]} only banked ${p1Banked}/${xBallTarget})`; }
+              else if(!p2Done&&p1Done){ ws="p1"; scoreStr=`${match.p1} wins (${match.p2.split(" / ")[0]} only banked ${p2Banked}/${xBallTarget})`; }
+              else if(!p1Done&&!p2Done){ ws="halve"; scoreStr=`No winner — both teams short`; }
+              else {
+                ws=p1Net<p2Net?"p1":p2Net<p1Net?"p2":"halve";
+                scoreStr=ws==="halve"?`Tied (${p1Net})`:`${ws==="p1"?match.p1:match.p2} wins (${Math.min(p1Net,p2Net)} vs ${Math.max(p1Net,p2Net)})`;
+              }
             } else if(isScramble){
-              // Scramble: count total strokes per team
+              // Scramble: lower total strokes wins — show score to par
               let t1=0,t2=0;
-              for(let h=1;h<=18;h++){
+              for(let h=holeStart;h<=holeEnd;h++){
                 const hs=holeScores[h]||{};
                 const s1=parseInt(hs["team_p1"]),s2=parseInt(hs["team_p2"]);
                 if(!isNaN(s1)&&s1>0)t1+=s1;
                 if(!isNaN(s2)&&s2>0)t2+=s2;
               }
+              const totalPar = Array.from({length:totalHoles},(_,i)=>holeStart+i).reduce((s,h)=>s+(course.pars[h-1]||4),0);
+              const rel1=t1-totalPar, rel2=t2-totalPar;
+              const fmtRel=r=>r===0?"E":r>0?`+${r}`:`${r}`;
+              const p1Lbl=p1Team==="red"?"Red":"Blue", p2Lbl=p2Team==="red"?"Red":"Blue";
               ws=t1<t2?"p1":t2<t1?"p2":"halve";
-              scoreStr=ws==="halve"?`Tied (${t1})`:`${ws==="p1"?match.p1:match.p2} wins (${Math.min(t1,t2)} vs ${Math.max(t1,t2)})`;
+              scoreStr=ws==="halve"?`Tied (${fmtRel(rel1)})`:`${ws==="p1"?p1Lbl:p2Lbl} wins (${fmtRel(ws==="p1"?rel1:rel2)} vs ${fmtRel(ws==="p1"?rel2:rel1)})`;
             } else {
               // Walk holes in order and freeze the result at the exact moment
               // the match became mathematically decided — extra holes played
