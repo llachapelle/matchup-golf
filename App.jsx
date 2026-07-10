@@ -1909,8 +1909,21 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
     for(let h=1;h<=18;h++) out[h] = seed[h] ? {...seed[h]} : {};
     setHoleScores(out);
     // Seed banked scores from match.bankedScores
-    const bankedSeed = match.bankedScores || {};
-    setBankedScoresEdit(typeof bankedSeed==="string" ? JSON.parse(bankedSeed) : bankedSeed);
+    // Live scoring saves as {hole: {playerKey: bool}}
+    // Edit screen uses {playerKey: {hole: bool}} — transpose here
+    const bankedSeed = match.bankedScores
+      ? (typeof match.bankedScores==="string" ? JSON.parse(match.bankedScores) : match.bankedScores)
+      : {};
+    const transposed = {};
+    Object.entries(bankedSeed).forEach(([hole, players])=>{
+      if(typeof players === "object"){
+        Object.entries(players).forEach(([pKey, val])=>{
+          if(!transposed[pKey]) transposed[pKey]={};
+          transposed[pKey][hole] = !!val;
+        });
+      }
+    });
+    setBankedScoresEdit(transposed);
     setHoleScoresInit(true);
   }, [match?.id]);
 
@@ -2165,7 +2178,17 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
       score:      matchScore.text.replace(/ thru \d+/,""),
       status:     "completed",
       holeScores: cleanScores,
-      bankedScores: isXBallEdit ? bankedScoresEdit : undefined,
+      bankedScores: isXBallEdit ? (()=>{
+        // Transpose back to hole-first format: {hole: {playerKey: bool}}
+        const out = {};
+        Object.entries(bankedScoresEdit).forEach(([pKey, holes])=>{
+          Object.entries(holes).forEach(([hole, val])=>{
+            if(!out[hole]) out[hole]={};
+            out[hole][pKey] = !!val;
+          });
+        });
+        return out;
+      })() : undefined,
     });
     setSaved(true);
     setTimeout(()=>{ setSaved(false); go("matches"); }, 800);
@@ -2404,6 +2427,26 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
                       })}
                     </>
                   )}
+
+                  {/* XBall: team banked totals summary */}
+                  {isXBallEdit&&(()=>{
+                    const p1Total = p1Players.reduce((sum,p)=>sum+Object.values(bankedScoresEdit[p.key]||{}).filter(Boolean).length,0);
+                    const p2Total = p2Players.reduce((sum,p)=>sum+Object.values(bankedScoresEdit[p.key]||{}).filter(Boolean).length,0);
+                    const p1Done = p1Total >= xBallTargetEdit;
+                    const p2Done = p2Total >= xBallTargetEdit;
+                    return(
+                      <div style={{display:"flex",gap:8,marginBottom:8}}>
+                        <div style={{flex:1,background:p1Done?C.greenBg:C.amberBg,borderRadius:8,padding:"6px 10px",textAlign:"center"}}>
+                          <div style={{fontSize:10,fontWeight:700,color:p1TeamColor,fontFamily:"Arial,sans-serif"}}>{p1TeamColor===C.red?"Red":"Blue"} Team</div>
+                          <div style={{fontSize:13,fontWeight:700,color:p1Done?C.green:C.amber,fontFamily:"Arial,sans-serif"}}>{p1Total}/{xBallTargetEdit}{p1Done?" ✓":""}</div>
+                        </div>
+                        <div style={{flex:1,background:p2Done?C.greenBg:C.amberBg,borderRadius:8,padding:"6px 10px",textAlign:"center"}}>
+                          <div style={{fontSize:10,fontWeight:700,color:p2TeamColor,fontFamily:"Arial,sans-serif"}}>{p2TeamColor===C.red?"Red":"Blue"} Team</div>
+                          <div style={{fontSize:13,fontWeight:700,color:p2Done?C.green:C.amber,fontFamily:"Arial,sans-serif"}}>{p2Total}/{xBallTargetEdit}{p2Done?" ✓":""}</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* XBall: banked toggle row per player */}
                   {isXBallEdit&&[...p1Players,...p2Players].map((player,pi)=>{
