@@ -2725,7 +2725,17 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   const totalHoles  = holeEnd - holeStart + 1; // 9 or 18
 
   // holeNum starts at match.thru (where scoring left off) or holeStart
-  const [holeNum,      setHoleNum]      = useState(()=>Math.min(Math.max((match.thru||0)+holeStart, holeStart), holeEnd));
+  const [holeNum,      setHoleNum]      = useState(()=>{
+    // Restore from localStorage if we're resuming the same match
+    try {
+      const savedMatchId = localStorage.getItem("mg_match_id");
+      const savedHole = parseInt(localStorage.getItem("mg_hole"));
+      if(savedMatchId===matchId && !isNaN(savedHole) && savedHole>=holeStart && savedHole<=holeEnd){
+        return savedHole;
+      }
+    } catch(e){}
+    return Math.min(Math.max((match.thru||0)+holeStart, holeStart), holeEnd);
+  });
   const [quickMode,    setQuickMode]    = useState(false);
   const [showUndo,     setShowUndo]     = useState(false);
   const [expandSide,   setExpandSide]   = useState(false);
@@ -3070,7 +3080,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   const preview = allEntered ? computeHoleWinner(curScores) : null;
 
   const advanceHole = () => {
-    if(holeNum<holeEnd) setHoleNum(holeNum+1);
+    if(holeNum<holeEnd){ const next=holeNum+1; setHoleNum(next); try{localStorage.setItem("mg_hole",next);}catch(e){} }
     else setShowSummary(true);
   };
 
@@ -3169,7 +3179,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     const newResults    = {...holeResults};  delete newResults[last];
     const newHoleScores = {...holeScores};   delete newHoleScores[last];
     setHoleResults(newResults);
-    setHoleNum(last);
+    setHoleNum(last); try{localStorage.setItem("mg_hole",last);}catch(e){}
     setShowUndo(false);
     setHoleScores(newHoleScores);
     const newStatus = computeStatusFromResults(newResults);
@@ -3485,7 +3495,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
                     status:"upcoming", thru:0, live_score:null,
                     score_data:null, banked_scores:null, winner_side:null, score:null
                   });
-                  setHoleScores({}); setHoleResults({}); setHoleNum(holeStart);
+                  setHoleScores({}); setHoleResults({}); setHoleNum(holeStart); try{localStorage.removeItem("mg_hole");}catch(e){}
                   setShowSummary(false); setShowClearConfirm(false);
                 }}
                   style={{background:C.red,border:"none",color:C.white,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"Arial,sans-serif",fontWeight:700}}>
@@ -3596,7 +3606,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
           const bg = cur ? C.sand : (showResultColor ? winColor : "transparent");
           const textCol = cur ? C.charcoal : (showResultColor && res && res!=="tie") ? C.white : C.gray;
           return(
-            <div key={h} onClick={()=>setHoleNum(h)} style={{width:16,height:16,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,fontFamily:"Arial,sans-serif",background:bg,border:cur?`2px solid ${C.sand}`:`1.5px solid ${(showResultColor&&res)?"transparent":C.light}`,color:textCol}}>
+            <div key={h} onClick={()=>{setHoleNum(h);try{localStorage.setItem("mg_hole",h);}catch(e){}}} style={{width:16,height:16,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,fontFamily:"Arial,sans-serif",background:bg,border:cur?`2px solid ${C.sand}`:`1.5px solid ${(showResultColor&&res)?"transparent":C.light}`,color:textCol}}>
               {h}
             </div>
           );
@@ -7441,7 +7451,7 @@ export default function App(){
 
   const handleSignOut = useCallback(() => {
     localStorage.removeItem("matchup_session");
-    try { localStorage.removeItem("mg_screen"); localStorage.removeItem("mg_match_id"); } catch(e){}
+    try { localStorage.removeItem("mg_screen"); localStorage.removeItem("mg_match_id"); localStorage.removeItem("mg_hole"); } catch(e){}
     setSession(null);
     setActiveTrip(null);
     setTripPlayers([]);
