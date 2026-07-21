@@ -1768,18 +1768,23 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
               );
             }
 
-            // All other formats: winner name badge
+            // All other formats: winner badge with player name + score
             return winSide==="halve" ? (
               <div style={{background:C.mist,borderRadius:8,padding:"4px 8px",textAlign:"center"}}>
                 <div style={{fontSize:11,fontWeight:700,color:C.gray,fontFamily:"Arial,sans-serif"}}>TIED</div>
                 <div style={{fontSize:10,color:C.gray,fontFamily:"Arial,sans-serif",marginTop:1}}>{m.score||""}</div>
               </div>
             ) : (
-              <div style={{background:winBg,borderRadius:8,padding:"4px 8px",textAlign:"center"}}>
-                <div style={{fontSize:10,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif",textTransform:"uppercase",letterSpacing:.5}}>
-                  {winTeam==="red"?"Red":"Blue"} wins
+              <div style={{background:winBg,borderRadius:8,padding:"4px 8px",textAlign:"center",minWidth:72}}>
+                <div style={{fontSize:9,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif",textTransform:"uppercase",letterSpacing:.6,opacity:.8}}>
+                  {winTeam==="red"?"RED":"BLUE"} WINS
                 </div>
-                <div style={{fontSize:11,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif",marginTop:1}}>{m.score||"—"}</div>
+                <div style={{fontSize:12,fontWeight:700,color:winColor2,fontFamily:"Arial,sans-serif",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:90}}>
+                  {winSide==="p1"
+                    ? ((m.p1Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p1)||"—")
+                    : ((m.p2Keys||[]).map(k=>resolveFirstName(k,tripPlayers)).join(" / ")||firstName(m.p2)||"—")}
+                </div>
+                <div style={{fontSize:10,color:winColor2,fontFamily:"Arial,sans-serif",opacity:.8}}>{m.score||""}</div>
               </div>
             );
           })()}
