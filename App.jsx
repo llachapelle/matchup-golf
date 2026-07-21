@@ -7016,28 +7016,33 @@ export default function App(){
   // destination. Bottom-nav taps (dashboard/matches/board/trip/profile) reset
   // history since those are top-level destinations, not a "drill in" action.
   const TOP_LEVEL_SCREENS = ["dashboard","matches","board","trip","profile"];
+  const PERSIST_SCREENS = ["live","matchedit","board","matches","trip","profile","dashboard","sidegames"];
+
   const setScreen = (dest) => {
     setScreenHistory(prev => {
-      if(TOP_LEVEL_SCREENS.includes(dest)) return []; // fresh start from a tab
-      if(screen === dest) return prev; // no-op navigation, don't push duplicate
+      if(TOP_LEVEL_SCREENS.includes(dest)) return [];
+      if(screen === dest) return prev;
       return [...prev, screen];
     });
     setScreenRaw(dest);
+    // Persist so reload returns to same screen
+    if(PERSIST_SCREENS.includes(dest)){
+      try { localStorage.setItem("mg_screen", dest); } catch(e){}
+    }
   };
   const goBack = () => {
     setScreenHistory(prev => {
       if(prev.length === 0){ setScreenRaw("dashboard"); return []; }
       const last = prev[prev.length-1];
       setScreenRaw(last);
+      try { localStorage.setItem("mg_screen", last); } catch(e){}
       return prev.slice(0,-1);
     });
   };
-  // Bottom-nav taps always start a fresh history — these are top-level
-  // destinations, not a "drill in" action, so Back from here should go
-  // to Dashboard rather than wherever you happened to be navigating before.
   const navigateTab = (dest) => {
     setScreenHistory([]);
     setScreenRaw(dest);
+    try { localStorage.setItem("mg_screen", dest); } catch(e){}
   };
 
   const updateMatch = (id, changes) =>
@@ -7050,11 +7055,11 @@ export default function App(){
   const showNav    = navScreens.includes(screen) && screen !== "intent" && screen !== "join" && screen !== "login";
   const goMatch = (matchId, dest) => {
     setSelectedMatchId(matchId);
+    try { localStorage.setItem("mg_match_id", matchId||""); } catch(e){}
     if(dest === "creatematch"){
       const m = matches.find(m=>m.id===matchId);
       setEditMatch(m || null);
     }
-    // Use setTimeout(0) to ensure selectedMatchId state is committed before screen changes
     setTimeout(()=>setScreen(dest), 0);
   };
 
@@ -7371,7 +7376,18 @@ export default function App(){
               }
               if(trip){
                 await loadTrip(trip);
-                setScreen("dashboard");
+                // Restore last screen from before reload if it was a mid-match screen
+                const savedScreen = (() => { try { return localStorage.getItem("mg_screen"); } catch(e){ return null; } })();
+                const savedMatchId = (() => { try { return localStorage.getItem("mg_match_id"); } catch(e){ return null; } })();
+                const restorable = ["live","matches","board","trip","profile","dashboard"];
+                if(savedScreen && restorable.includes(savedScreen)){
+                  if(savedMatchId && savedScreen==="live"){
+                    setSelectedMatchId(savedMatchId);
+                  }
+                  setScreenRaw(savedScreen);
+                } else {
+                  setScreen("dashboard");
+                }
               } else {
                 // Logged in but no active trip — go straight to trip setup
                 setScreen("intent");
@@ -7425,6 +7441,7 @@ export default function App(){
 
   const handleSignOut = useCallback(() => {
     localStorage.removeItem("matchup_session");
+    try { localStorage.removeItem("mg_screen"); localStorage.removeItem("mg_match_id"); } catch(e){}
     setSession(null);
     setActiveTrip(null);
     setTripPlayers([]);
