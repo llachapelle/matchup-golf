@@ -1460,9 +1460,14 @@ function DashboardScreen({go, goMatch, matches, ts, playerRecords, activeTrip, t
 function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userInitials}){
   const [expandedMatch,     setExpandedMatch]     = useState(null);
   const [showCompleted,     setShowCompleted]     = useState(false);
-  const [collapsedRounds,   setCollapsedRounds]   = useState({});
-
-  const toggleRound = (key) => setCollapsedRounds(p=>({...p,[key]:!p[key]}));
+  const [collapsedRounds, setCollapsedRounds] = useState(()=>{
+    try { const s=localStorage.getItem("mg_collapsed_matches"); return s?JSON.parse(s):{};} catch(e){return {};}
+  });
+  const toggleCollapsed = (key) => setCollapsedRounds(p=>{
+    const next={...p,[key]:!p[key]};
+    try{localStorage.setItem("mg_collapsed_matches",JSON.stringify(next));}catch(e){}
+    return next;
+  });
 
   const active   = matches.filter(m=>m.status==="live");
   const upcoming = matches.filter(m=>m.status==="upcoming");
@@ -1532,7 +1537,7 @@ function MatchesScreen({go, goMatch, matches, ts, tripPlayers, activeTrip, userI
         <div key={sectionKey} style={{marginBottom:4}}>
           {groupByRound(arr).length > 1 ? (
             <>
-              <button onClick={()=>setCollapsedRounds(p=>({...p,[sectionKey]:!p[sectionKey]}))}
+              <button onClick={()=>toggleCollapsed(sectionKey)}
                 style={{width:"100%",background:"none",border:"none",padding:"4px 0 8px",cursor:"pointer",
                   display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
                 <div>
@@ -5347,7 +5352,14 @@ function TripNameEditor({activeTrip}){
 
 function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddMatch, onGoMatch, userInitials, onUpdatePlayer, onDeletePlayer, onDeleteTrip, onAdjustPoints}){
   const [section,   setSection]  = useState("Matches");
-  const [collapsedRounds, setCollapsedRounds] = useState({});
+  const [collapsedRounds, setCollapsedRounds] = useState(()=>{
+    try { const s=localStorage.getItem("mg_collapsed_trip"); return s?JSON.parse(s):{};} catch(e){return {};}
+  });
+  const toggleTripRound = (key) => setCollapsedRounds(p=>{
+    const next={...p,[key]:!p[key]};
+    try{localStorage.setItem("mg_collapsed_trip",JSON.stringify(next));}catch(e){}
+    return next;
+  });
   const [editingPlayer, setEditingPlayer] = useState(null);
   const [editName,  setEditName]  = useState("");
   const [editHcp,   setEditHcp]   = useState("");
@@ -5711,7 +5723,7 @@ function TripScreen({go, matches, playerRecords, activeTrip, tripPlayers, onAddM
               return(
                 <div key={group.key} style={{marginBottom:4}}>
                   {/* Round header — tappable to collapse */}
-                  <button onClick={()=>setCollapsedRounds(p=>({...p,[group.key]:!p[group.key]}))}
+                  <button onClick={()=>toggleTripRound(group.key)}
                     style={{width:"100%",background:C.white,border:`1px solid ${C.light}`,
                       borderRadius:isCollapsed?12:"12px 12px 0 0",padding:"11px 14px",
                       cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",
