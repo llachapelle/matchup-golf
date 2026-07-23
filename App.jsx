@@ -2809,28 +2809,20 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   const [holeResults, setHoleResults] = useState(()=>{
     if(!match.thru || match.thru===0) return {};
     const out={};
-    for(let h=1;h<=match.thru;h++){
+    for(let h=holeStart;h<=Math.min(match.thru+holeStart-1, holeEnd);h++){
       const scores = match.holeScores?.[h] || {};
-      const hSI    = course.strokeIndex[h-1];
-      const allP1  = [...(match.p1Keys||[]), ...(match.p1||"").split("/").map(n=>n.trim().toLowerCase()).filter(n=>!(match.p1Keys||[]).includes(n)&&n)];
-      const allP2  = [...(match.p2Keys||[]), ...(match.p2||"").split("/").map(n=>n.trim().toLowerCase()).filter(n=>!(match.p2Keys||[]).includes(n)&&n)];
+      const allP1  = [...(match.p1Keys||[])];
+      const allP2  = [...(match.p2Keys||[])];
       const netFor = (k) => {
         const g=parseInt(scores[k]); if(isNaN(g)||g<=0) return Infinity;
-        const hSI2=course.strokeIndex[h-1];
-        // RAW player built with WHS
-        const rBuilt=players.find(p=>p.key===k);
-        if(rBuilt) return g-sOnHole(rBuilt.ms, hSI2);
-        // Guest player with handicap
-        const gp=GUEST_PLAYERS[k];
-        if(gp){
-          const ch=Math.round(gp.index*(course.slope/113)+(course.rating-course.par));
-          const ph=Math.round(ch*(format.toLowerCase().includes("singles")?1.0:0.90));
-          return g-sOnHole(Math.max(0,ph-1), hSI2);
-        }
-        return g;
+        // Use pre-built players array which already applies correct hcp_mode
+        const built=players.find(p=>p.key===k);
+        if(built) return g-sOnHole(built.ms, course.strokeIndex[h-1]);
+        return g; // unknown player: gross
       };
-      const p1best=Math.min(...allP1.map(netFor));
-      const p2best=Math.min(...allP2.map(netFor));
+      const p1best=Math.min(...allP1.map(netFor).filter(n=>n<Infinity), Infinity);
+      const p2best=Math.min(...allP2.map(netFor).filter(n=>n<Infinity), Infinity);
+      if(p1best===Infinity&&p2best===Infinity) continue;
       out[h]=p1best<p2best?"p1":p2best<p1best?"p2":"tie";
     }
     return out;
@@ -2986,7 +2978,9 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
   };
 
   // Pure function: compute match status from hole results and scores
-  const computeStatusFromResults = (results) => {
+  // overrideScores allows passing fresh scores before React state updates
+  const computeStatusFromResults = (results, overrideScores) => {
+    const scores = overrideScores || holeScores;
     const p1Col=p1Team==="red"?C.sand:"#85C1E9";
     const p2Col=p2Team==="red"?C.sand:"#85C1E9";
 
@@ -3009,7 +3003,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       }
       // If round is over (all holes played) and one side didn't bank enough — auto-loss
       const holesPlayed = Array.from({length:totalHoles},(_,i)=>holeStart+i)
-        .filter(h=>p1Keys.some(k=>parseInt((holeScores[h]||{})[k])>0)||p2Keys.some(k=>parseInt((holeScores[h]||{})[k])>0)).length;
+        .filter(h=>p1Keys.some(k=>parseInt((scores[h]||{})[k])>0)||p2Keys.some(k=>parseInt((scores[h]||{})[k])>0)).length;
       if(holesPlayed>=totalHoles){
         if(!p1Done&&p2Done) return {text:`${match.p2} wins (${match.p1.split(" / ")[0]} short ${xBallTarget-p1Banked})`, color:p2Col};
         if(!p2Done&&p1Done) return {text:`${match.p1} wins (${match.p2.split(" / ")[0]} short ${xBallTarget-p2Banked})`, color:p1Col};
@@ -3023,7 +3017,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       let t1=0,t2=0,h1=0,h2=0;
       const par = course.pars || [];
       for(let h=holeStart;h<=holeEnd;h++){
-        const hs=holeScores[h]||{};
+        const hs=scores[h]||{};
         const s1=parseInt(hs["team_p1"]), s2=parseInt(hs["team_p2"]);
         if(!isNaN(s1)&&s1>0){t1+=s1;h1++;}
         if(!isNaN(s2)&&s2>0){t2+=s2;h2++;}
@@ -3116,7 +3110,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
       setHoleResults(newResults);
     }
 
-    const newStatus = computeStatusFromResults(newResults);
+    const newStatus = computeStatusFromResults(newResults, newHoleScores);
     updateMatch(match.id, {
       thru:         holeNum,
       liveScore:    newStatus.text,
@@ -3197,7 +3191,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
     setHoleNum(last); try{localStorage.setItem("mg_hole",last);}catch(e){}
     setShowUndo(false);
     setHoleScores(newHoleScores);
-    const newStatus = computeStatusFromResults(newResults);
+    const newStatus = computeStatusFromResults(newResults, newHoleScores);
     updateMatch(match.id, {
       thru:       Math.max(0, last-1),
       liveScore:  newStatus.text,
