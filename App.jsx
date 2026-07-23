@@ -7303,8 +7303,8 @@ export default function App(){
             return prev.map(m => m.id === row.id ? {
               ...m,
               status:       row.status      ?? m.status,
-              thru:         row.thru        ?? m.thru,
-              liveScore:    row.live_score  ?? m.liveScore,
+              thru:         row.thru        != null ? Math.max(row.thru, m.thru||0) : m.thru,
+              liveScore:    row.live_score  || m.liveScore,
               winnerSide:   row.winner_side ?? m.winnerSide,
               score:        row.score       ?? m.score,
               format:       row.format      ?? m.format,
