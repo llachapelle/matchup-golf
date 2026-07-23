@@ -695,8 +695,15 @@ const scoreLabel = (gross, par) => {
   return `+${diff}`;
 };
 
-const calcCH  = (idx,c) => Math.round(idx*(c.slope/113)+(c.rating-c.par));
-const calcPH  = (ch,fmt) => Math.round(ch*((fmt||"").toLowerCase().includes("singles")?1.0:0.90));
+const calcCH  = (idx,c,hcpMode) => {
+  if(hcpMode==="straight") return Math.round(idx); // index used directly, no slope/rating adjustment
+  return Math.round(idx*(c.slope/113)+(c.rating-c.par));  // WHS course handicap
+};
+const calcPH  = (ch,fmt,hcpPct) => {
+  // hcpPct overrides the format-based percentage
+  const pct = hcpPct!=null ? hcpPct/100 : (fmt||"").toLowerCase().includes("singles") ? 1.0 : 0.90;
+  return Math.round(ch*pct);
+};
 const calcMS  = phs => { const m=Math.min(...phs); return phs.map(ph=>Math.max(0,ph-m)); };
 const sOnHole = (ms,si) => { if(ms<=0)return 0; return Math.floor(ms/18)+(si<=ms%18?1:0); };
 
@@ -706,22 +713,20 @@ const sOnHole9 = (ms9, si9) => { if(ms9<=0)return 0; return Math.floor(ms9/9)+(s
 // For 9-hole matches, remap stroke indices so the 9 lowest-SI holes
 // from the full 18 get SI 1–9, rest are excluded. Returns null for holes not in range.
 const remap9HoleSI = (strokeIndex18, holeStart, holeEnd) => {
-  // Build array of {hole, si} for holes in range
   const inRange = strokeIndex18
     .map((si,i) => ({hole: i+1, si}))
     .filter(h => h.hole >= holeStart && h.hole <= holeEnd);
-  // Sort by stroke index, assign new SI 1–9
   const sorted = [...inRange].sort((a,b)=>a.si-b.si);
   const remap = {};
   sorted.forEach((h,i) => { remap[h.hole] = i+1; });
-  return remap; // { holeNumber: newSI1to9 }
+  return remap;
 };
 
-function buildPlayers(raw,course,format){
-  const a=raw.map(p=>({...p,ch:calcCH(p.index,course)}));
-  const b=a.map(p=>({...p,ph:calcPH(p.ch,format)}));
-  const ms=calcMS(b.map(p=>p.ph));
-  return b.map((p,i)=>({...p,ms:ms[i]}));
+function buildPlayers(raw, course, format, hcpMode, hcpPct){
+  const a = raw.map(p=>({...p, ch: calcCH(p.index, course, hcpMode)}));
+  const b = a.map(p=>({...p, ph: calcPH(p.ch, format, hcpMode==="off" ? 0 : hcpPct!=null ? hcpPct : null)}));
+  const ms = calcMS(b.map(p=>p.ph));
+  return b.map((p,i)=>({...p, ms:ms[i]}));
 }
 const PLAYERS = buildPlayers(RAW,COURSES.mammoth,"Best Ball");
 
@@ -1980,7 +1985,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   };
 
   const rawInMatch   = allMatchKeys.map(findPlayer);
-  const builtPlayers = buildPlayers(rawInMatch.length ? rawInMatch : [{key:"p",name:"P",index:0,team:"red"}], course, format);
+  const builtPlayers = buildPlayers(rawInMatch.length ? rawInMatch : [{key:"p",name:"P",index:0,team:"red"}], course, format, match.hcp_mode||"whs", match.hcp_pct);
   const playerByKey  = Object.fromEntries(builtPlayers.map(p=>[p.key, p]));
 
   const p1Players = (match.p1Keys||[]).map(k=>{
@@ -2235,7 +2240,7 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
             <div style={{fontSize:18,fontWeight:700,color:resultColor}}>{matchScore.text}</div>
           </div>
           <div style={{textAlign:"right",fontSize:11,color:"rgba(255,255,255,.55)",fontFamily:"Arial,sans-serif"}}>
-            Live · WHS applied<br/>Edit scores below
+            Live · {match.hcp_mode==="straight"?"Straight HCP":match.hcp_mode==="off"?"Gross only":match.hcp_mode==="custom"?`${match.hcp_pct||90}% HCP`:"WHS"} applied<br/>Edit scores below
           </div>
         </div>
       </div>
@@ -2693,7 +2698,7 @@ function LiveMatchScreen({go, goBack, goMatch, matchId, matches, updateMatch, tr
 
   const realPlayers = buildRealPlayers();
   const allKeys     = [...(match.p1Keys||[]),...(match.p2Keys||[])];
-  const players     = buildPlayers(realPlayers, course, format);
+  const players     = buildPlayers(realPlayers, course, format, match.hcp_mode||"whs", match.hcp_pct);
   const playerByKey = Object.fromEntries(players.map(p=>[p.key,p]));
 
   // RAW players per side
@@ -6594,14 +6599,15 @@ function CreateMatchScreen({go, goBack, activeTrip, tripPlayers, onMatchCreated,
         <div style={card()}>
           <div style={{fontSize:13,fontWeight:700,color:C.charcoal,marginBottom:4}}>Handicaps</div>
           <div style={{fontSize:11,color:C.gray,fontFamily:"Arial,sans-serif",marginBottom:10}}>
-            {hcpMode==="whs"    ? `WHS: ${selectedFormat?.whs||"90%"} of each player's course handicap`
-            : hcpMode==="custom"? `Custom: ${hcpPct}% of each player's course handicap`
+            {hcpMode==="whs"      ? `WHS: course handicap using slope/rating from selected tees`
+            : hcpMode==="straight"? `Straight: handicap index used directly, no slope/rating adjustment`
+            : hcpMode==="custom"  ? `Custom: ${hcpPct}% of each player's course handicap`
             : "Off: gross scores only, no strokes applied"}
           </div>
-          <div style={{display:"flex",gap:6,marginBottom:hcpMode==="custom"?12:0}}>
-            {[["whs","WHS (auto)"],["custom","Custom %"],["off","Off (gross)"]].map(([id,label])=>(
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:hcpMode==="custom"?12:0}}>
+            {[["whs","WHS"],["straight","Straight"],["custom","Custom %"],["off","Off"]].map(([id,label])=>(
               <button key={id} onClick={()=>setHcpMode(id)}
-                style={{flex:1,background:hcpMode===id?C.forest:C.smoke,
+                style={{flex:1,minWidth:"40%",background:hcpMode===id?C.forest:C.smoke,
                   color:hcpMode===id?C.white:C.gray,
                   border:`1.5px solid ${hcpMode===id?C.forest:C.light}`,
                   borderRadius:10,padding:"8px 4px",fontSize:11,
