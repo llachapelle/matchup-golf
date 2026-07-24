@@ -1738,6 +1738,7 @@ function MatchCard({m, tripPlayers, expanded, onTap, goMatch, go, fmtDate, showD
           {!isScr&&!isXB&&m.status==="live"&&<>
             <div style={{fontSize:14,fontWeight:700,color:scoreColor(m.liveScore)}}>{m.liveScore}</div>
             <div style={{fontSize:11,color:C.gray}}>thru {m.thru}</div>
+            <div style={{fontSize:9,color:C.gray,opacity:.5}}>db:{m.liveScore||"null"}</div>
             <button onClick={e=>{e.stopPropagation();goMatch(m.id,"live");}} style={{marginTop:6,background:C.forest,color:C.white,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontFamily:"Arial,sans-serif",fontWeight:700,cursor:"pointer"}}>Score →</button>
           </>}
           {m.status==="completed"&&(()=>{
@@ -2175,36 +2176,49 @@ function MatchEditScreen({go, goBack, matchId, matches, updateMatch, tripPlayers
   const p2TeamColor = p2Players.length ? teamColor(p2Players[0].team) : C.blue;
 
   // ── Save ─────────────────────────────────────────────────────────────────────
-  const saveEdit = () => {
+  const saveEdit = async () => {
     const cleanScores = {};
     for(let h=1;h<=18;h++){
       const hData = holeScores[h]||{};
       if(Object.keys(hData).some(k=>hData[k]!=="")) cleanScores[h]={...hData};
     }
-    // Only save a final winnerSide if match is definitively decided
     const finalWinner = (()=>{
       const ms = matchScore;
-      // If text contains "thru" it's partial — keep existing winnerSide
       if(ms.text.includes("thru")) return match.winnerSide;
       return ms.winnerSide;
     })();
-    updateMatch(match.id, {
-      winnerSide: finalWinner,
-      score:      matchScore.text.replace(/ thru \d+/,""),
-      status:     "completed",
-      holeScores: cleanScores,
-      bankedScores: isXBallEdit ? (()=>{
-        // Transpose back to hole-first format: {hole: {playerKey: bool}}
-        const out = {};
-        Object.entries(bankedScoresEdit).forEach(([pKey, holes])=>{
-          Object.entries(holes).forEach(([hole, val])=>{
-            if(!out[hole]) out[hole]={};
-            out[hole][pKey] = !!val;
-          });
+    const bankedOut = isXBallEdit ? (()=>{
+      const out = {};
+      Object.entries(bankedScoresEdit).forEach(([pKey, holes])=>{
+        Object.entries(holes).forEach(([hole, val])=>{
+          if(!out[hole]) out[hole]={};
+          out[hole][pKey] = !!val;
         });
-        return out;
-      })() : undefined,
+      });
+      return out;
+    })() : undefined;
+
+    updateMatch(match.id, {
+      winnerSide:   finalWinner,
+      score:        matchScore.text.replace(/ thru \d+/,""),
+      status:       "completed",
+      holeScores:   cleanScores,
+      bankedScores: bankedOut,
     });
+
+    // Write to DB
+    if(match.id && typeof match.id==="string" && match.id.length>10){
+      try {
+        await db.patch("matches", `id=eq.${match.id}`, {
+          winner_side:  finalWinner,
+          score:        matchScore.text.replace(/ thru \d+/,""),
+          status:       "completed",
+          score_data:   JSON.stringify(cleanScores),
+          banked_scores: bankedOut ? JSON.stringify(bankedOut) : undefined,
+        });
+      } catch(e){ console.warn("Failed to save match edit:", e.message); }
+    }
+
     setSaved(true);
     setTimeout(()=>{ setSaved(false); go("matches"); }, 800);
   };
@@ -7093,6 +7107,10 @@ export default function App(){
   const loadTrip = useCallback(async (trip) => {
     setTripLoading(true);
     try {
+      // Fetch fresh trip data to get manual_points and other fields
+      const freshTrips = await db.get("trips", `id=eq.${trip.id}&select=*`);
+      const freshTrip = freshTrips[0] || trip;
+
       const players = await db.get("trip_players", `trip_id=eq.${trip.id}&select=*&order=created_at.asc`);
       setTripPlayers(players);
 
@@ -7185,8 +7203,23 @@ export default function App(){
           })(),
         }));
         setMatches(appMatches);
+
+        // Load manual point adjustments from trip
+        const pts = freshTrip.manual_points;
+        if(pts && (pts.red || pts.blue)){
+          setMatches(prev => {
+            const withoutAdj = prev.filter(m=>m.id!=="__adj__");
+            return [...withoutAdj, {
+              id:"__adj__", status:"completed", format:"Manual Adjustment",
+              p1:"Red", p2:"Blue", p1Keys:[], p2Keys:[],
+              winnerSide: pts.red>pts.blue?"p1":pts.blue>pts.red?"p2":"halve",
+              score:`Red +${pts.red} Blue +${pts.blue}`,
+              adjRed: pts.red||0, adjBlue: pts.blue||0,
+            }];
+          });
+        }
       }
-      setActiveTrip(trip);
+      setActiveTrip(freshTrip);
     } catch(e){ console.error("Failed to load trip:", e); }
     setTripLoading(false);
   }, []);
@@ -7294,6 +7327,7 @@ export default function App(){
         { event: "*", schema: "public", table: "matches", filter: `trip_id=eq.${activeTrip.id}` },
         (payload) => {
           const row = payload.new;
+          console.log("[REALTIME matches]", row?.id?.slice(0,8), "live_score:", row?.live_score, "thru:", row?.thru);
           if(!row?.id) return;
           setMatches(prev => {
             const exists = prev.find(m => m.id === row.id);
@@ -7500,28 +7534,30 @@ export default function App(){
     } catch(e){ alert("Failed to delete trip: " + e.message); }
   }, [activeTrip]);
 
-  const handleAdjustPoints = useCallback((team, delta) => {
-    // Store manual point adjustments as a special synthetic match
-    // that deriveTeamScores picks up alongside real matches.
+  const handleAdjustPoints = useCallback(async (team, delta) => {
     setMatches(prev => {
       const existing = prev.find(m=>m.id==="__adj__");
+      const newAdj = existing
+        ? { adjRed: (existing.adjRed||0) + (team==="red" ? delta : 0), adjBlue: (existing.adjBlue||0) + (team==="blue" ? delta : 0) }
+        : { adjRed: team==="red" ? delta : 0, adjBlue: team==="blue" ? delta : 0 };
       if(existing){
-        return prev.map(m=>m.id==="__adj__" ? {
-          ...m,
-          adjRed:  (m.adjRed||0)  + (team==="red"  ? delta : 0),
-          adjBlue: (m.adjBlue||0) + (team==="blue" ? delta : 0),
-        } : m);
+        return prev.map(m=>m.id==="__adj__" ? {...m, ...newAdj} : m);
       }
-      return [...prev, {
-        id:"__adj__", status:"completed", format:"Manual Adjustment",
-        p1:"Red", p2:"Blue", p1Keys:[], p2Keys:[],
-        winnerSide: team==="red" ? "p1" : "p2",
-        score:`+${delta} pts`,
-        adjRed:  team==="red"  ? delta : 0,
-        adjBlue: team==="blue" ? delta : 0,
-      }];
+      return [...prev, { id:"__adj__", status:"completed", format:"Manual Adjustment", p1:"Red", p2:"Blue", p1Keys:[], p2Keys:[], winnerSide: team==="red" ? "p1" : "p2", score:`+${Math.abs(delta)} pts`, ...newAdj }];
     });
-  }, []);
+    // Persist to trips table
+    if(activeTrip?.id){
+      try {
+        const current = await db.get("trips", `id=eq.${activeTrip.id}&select=manual_points`);
+        const pts = current[0]?.manual_points || {red:0, blue:0};
+        const updated = {
+          red:  (pts.red||0)  + (team==="red"  ? delta : 0),
+          blue: (pts.blue||0) + (team==="blue" ? delta : 0),
+        };
+        await db.patch("trips", `id=eq.${activeTrip.id}`, { manual_points: updated });
+      } catch(e){ console.warn("Failed to save manual points:", e.message); }
+    }
+  }, [activeTrip]);
 
   // Quick Match: silently creates a minimal shadow trip so all match/scoring
   // logic works unchanged, then drops the user straight into match creation.
